@@ -24,6 +24,7 @@ export interface ToolExecution {
   status: "running" | "processing" | "completed" | "error";
   args?: Record<string, unknown>;
   result?: string;
+  details?: unknown;
   error?: string;
   stages?: PipelineStage[];
   logs?: string[];

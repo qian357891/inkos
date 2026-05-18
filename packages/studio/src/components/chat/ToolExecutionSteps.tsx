@@ -88,19 +88,62 @@ function extractResultPath(result: string | undefined, label: string): string | 
   return path || null;
 }
 
+export interface GeneratedArtifactDetails {
+  readonly kind: "short_fiction_created" | "cover_generated";
+  readonly title?: string;
+  readonly storyId?: string;
+  readonly finalMarkdownPath?: string;
+  readonly salesPackagePath?: string;
+  readonly coverPromptPath?: string;
+  readonly coverImagePath?: string;
+  readonly coverError?: string;
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+export function getGeneratedArtifactDetails(exec: ToolExecution): GeneratedArtifactDetails | null {
+  if (!["short_fiction_run", "generate_cover"].includes(exec.tool)) return null;
+  if (!exec.details || typeof exec.details !== "object") return null;
+  const record = exec.details as Record<string, unknown>;
+  if (record.kind !== "short_fiction_created" && record.kind !== "cover_generated") return null;
+  return {
+    kind: record.kind,
+    title: stringField(record, "title"),
+    storyId: stringField(record, "storyId"),
+    finalMarkdownPath: stringField(record, "finalMarkdownPath"),
+    salesPackagePath: stringField(record, "salesPackagePath"),
+    coverPromptPath: stringField(record, "coverPromptPath"),
+    coverImagePath: stringField(record, "coverImagePath"),
+    coverError: stringField(record, "coverError"),
+  };
+}
+
 function ShortFictionResultPreview({ exec }: { exec: ToolExecution }) {
   if (!["short_fiction_run", "generate_cover"].includes(exec.tool) || exec.status !== "completed") return null;
-  const coverPath = extractResultPath(exec.result, "Cover image");
-  if (!coverPath || !/\.(png|jpe?g|webp)$/iu.test(coverPath)) return null;
+  const details = getGeneratedArtifactDetails(exec);
+  const coverPath = details?.coverImagePath ?? extractResultPath(exec.result, "Cover image");
+  const coverError = details?.coverError ?? extractResultPath(exec.result, "Cover image reason");
+  if (!coverPath || !/\.(png|jpe?g|webp)$/iu.test(coverPath)) {
+    if (!coverError) return null;
+    return (
+      <div className="mx-3 mb-3 mt-1 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        封面未生成：{coverError}
+      </div>
+    );
+  }
 
   const coverUrl = buildApiUrl(`/project/files/${encodeProjectPath(coverPath)}`);
   if (!coverUrl) return null;
+  const title = details?.title ?? details?.storyId ?? "短篇封面";
 
   return (
     <div className="mx-3 mb-3 mt-1 overflow-hidden rounded-xl border border-border/40 bg-background/70">
       <img
         src={coverUrl}
-        alt="短篇封面"
+        alt={title}
         className="block max-h-[360px] w-full object-contain bg-muted/20"
         loading="lazy"
       />

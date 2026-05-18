@@ -1959,6 +1959,8 @@ describe("createStudioServer daemon lifecycle", () => {
     await mkdir(join(root, "shorts", "demo", "final"), { recursive: true });
     await writeFile(imagePath, Buffer.from("fake-png"));
     await writeFile(join(root, "shorts", "demo", "final", "cover.txt"), "nope", "utf-8");
+    await mkdir(join(root, "books", "demo"), { recursive: true });
+    await writeFile(join(root, "books", "demo", "cover.png"), Buffer.from("private-book-image"));
 
     const ok = await app.request("http://localhost/api/v1/project/files/shorts/demo/final/cover.png");
     expect(ok.status).toBe(200);
@@ -1967,6 +1969,9 @@ describe("createStudioServer daemon lifecycle", () => {
 
     const unsupported = await app.request("http://localhost/api/v1/project/files/shorts/demo/final/cover.txt");
     expect(unsupported.status).toBe(415);
+
+    const unsupportedRoot = await app.request("http://localhost/api/v1/project/files/books/demo/cover.png");
+    expect(unsupportedRoot.status).toBe(400);
 
     const traversal = await app.request("http://localhost/api/v1/project/files/../inkos.json");
     expect([400, 404]).toContain(traversal.status);

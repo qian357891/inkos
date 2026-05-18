@@ -9,7 +9,7 @@ export type StreamEvent =
   | { type: "thinking:end" }
   | { type: "draft:delta"; text: string }
   | { type: "tool:start"; id: string; tool: string; agent?: string; stages?: string[] }
-  | { type: "tool:end"; id: string; isError?: boolean; result?: unknown }
+  | { type: "tool:end"; id: string; isError?: boolean; result?: unknown; details?: unknown }
   | { type: "log:stage"; stageName: string }
   | { type: "llm:progress"; status: string; elapsedMs: number; totalChars: number; chineseChars: number };
 
@@ -142,6 +142,7 @@ export function buildPartsFromEvents(events: StreamEvent[]): MessagePart[] {
             exec.completedAt = Date.now();
             if (event.isError) exec.error = localizeKnownRuntimeMessage(summarizeToolResult(event.result));
             else exec.result = summarizeToolResult(event.result);
+            if (event.details !== undefined) exec.details = event.details;
             // Mark all remaining stages as completed
             exec.stages = exec.stages?.map((s) =>
               s.status !== "completed" ? { ...s, status: "completed" as const, progress: undefined } : s

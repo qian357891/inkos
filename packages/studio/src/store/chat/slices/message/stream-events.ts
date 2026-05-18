@@ -3,6 +3,7 @@ import type { ChatStore, MessageActions, PipelineStage } from "../../types";
 import { shouldRefreshSidebarForTool } from "../../message-policy";
 import {
   deriveFlat,
+  extractToolDetails,
   extractToolError,
   findRunningToolPart,
   getOrCreateStream,
@@ -185,6 +186,8 @@ export function attachSessionStreamListeners({
             );
             if (data.isError) execution.error = extractToolError(data.result);
             else execution.result = summarizeResult(data.result);
+            const details = data.details ?? extractToolDetails(data.result);
+            if (details !== undefined) execution.details = details;
             return { type: "tool" as const, execution };
           });
           const flat = deriveFlat(parts);

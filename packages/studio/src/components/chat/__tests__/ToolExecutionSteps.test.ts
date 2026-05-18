@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ToolExecution } from "../../../store/chat/types";
-import { groupToolExecutionsChronologically } from "../ToolExecutionSteps";
+import { getGeneratedArtifactDetails, groupToolExecutionsChronologically } from "../ToolExecutionSteps";
 
 const makeExec = (overrides: Partial<ToolExecution> & { id: string; tool: string }): ToolExecution => ({
   label: "test",
@@ -87,5 +87,28 @@ describe("groupChronologically", () => {
     expect(groups.map((group) => group.type)).toEqual(["utilities", "pipeline", "pipeline", "utilities"]);
     expect(groups[1].type === "pipeline" ? groups[1].exec.tool : "").toBe("generate_cover");
     expect(groups[2].type === "pipeline" ? groups[2].exec.tool : "").toBe("short_fiction_run");
+  });
+
+  it("extracts generated cover details from public short fiction tools", () => {
+    const exec = makeExec({
+      id: "short-1",
+      tool: "short_fiction_run",
+      label: "短篇生产",
+      details: {
+        kind: "short_fiction_created",
+        storyId: "demo-story",
+        finalMarkdownPath: "shorts/demo-story/final/full.md",
+        salesPackagePath: "shorts/demo-story/final/sales-package.md",
+        coverImagePath: "shorts/demo-story/final/cover.png",
+      },
+    });
+
+    expect(getGeneratedArtifactDetails(exec)).toMatchObject({
+      kind: "short_fiction_created",
+      storyId: "demo-story",
+      finalMarkdownPath: "shorts/demo-story/final/full.md",
+      salesPackagePath: "shorts/demo-story/final/sales-package.md",
+      coverImagePath: "shorts/demo-story/final/cover.png",
+    });
   });
 });

@@ -27,6 +27,7 @@ export const ToolExecutionSchema = z.object({
   status: z.enum(["running", "processing", "completed", "error"]),
   args: z.record(z.unknown()).optional(),
   result: z.string().optional(),
+  details: z.unknown().optional(),
   error: z.string().optional(),
   stages: z.array(PipelineStageSchema).optional(),
   startedAt: z.number(),

@@ -173,6 +173,46 @@ function extractToolError(result: unknown): string {
   return String(result).slice(0, 500);
 }
 
+function resolveProjectImageFile(root: string, rawPath: string): { readonly resolved: string; readonly contentType: string } {
+  let relPath: string;
+  try {
+    relPath = decodeURIComponent(rawPath).replace(/^\/+/u, "");
+  } catch {
+    throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Invalid project file path");
+  }
+
+  if (
+    !relPath
+    || relPath.includes("\0")
+    || isAbsolute(relPath)
+    || relPath.split(/[\\/]+/u).includes("..")
+  ) {
+    throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Invalid project file path");
+  }
+  if (!relPath.startsWith("shorts/") && !relPath.startsWith("covers/")) {
+    throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Only generated shorts/ and covers/ images can be previewed");
+  }
+
+  const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
+  const contentTypes: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+  };
+  const contentType = contentTypes[ext];
+  if (!contentType) {
+    throw new ApiError(415, "UNSUPPORTED_PROJECT_FILE_TYPE", "Unsupported project file type");
+  }
+
+  const resolved = resolve(root, relPath);
+  const rel = relative(root, resolved);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Invalid project file path");
+  }
+  return { resolved, contentType };
+}
+
 function isLikelyFailedToolResult(exec: CollectedToolExec): boolean {
   if (exec.status === "error") return true;
   const text = `${exec.error ?? ""}\n${exec.result ?? ""}`.toLowerCase();
@@ -1834,30 +1874,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   });
 
   app.get("/api/v1/project/files/:file{.+}", async (c) => {
-    const file = c.req.param("file");
-    const resolved = resolve(root, file);
-    const rel = relative(root, resolved);
-    if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
-      return c.json({ error: "Invalid project file path" }, 400);
-    }
-
-    const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
-    const contentTypes: Record<string, string> = {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      webp: "image/webp",
-    };
-    const contentType = contentTypes[ext];
-    if (!contentType) {
-      return c.json({ error: "Unsupported project file type" }, 415);
-    }
+    const file = resolveProjectImageFile(root, c.req.param("file"));
 
     try {
-      const content = await readFile(resolved);
+      const content = await readFile(file.resolved);
       return new Response(content, {
         headers: {
-          "Content-Type": contentType,
+          "Content-Type": file.contentType,
           "Cache-Control": "no-store",
         },
       });
@@ -2296,6 +2319,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             id: toolCallId,
             tool: "sub_agent",
             result: toolResult,
+            details: toolResult.details,
             isError: false,
           });
           await appendManualSessionMessages(root, bookSession.sessionId, [{
@@ -2438,6 +2462,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
                 id: event.toolCallId,
                 tool: event.toolName,
                 result: event.result,
+                details: exec?.details,
                 isError: event.isError,
               });
             }

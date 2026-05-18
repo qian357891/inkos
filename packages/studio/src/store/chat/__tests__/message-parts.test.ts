@@ -134,6 +134,23 @@ describe("buildPartsFromEvents", () => {
     }
   });
 
+  it("preserves structured tool details for generated artifacts", () => {
+    const details = {
+      kind: "short_fiction_created",
+      storyId: "demo",
+      coverImagePath: "shorts/demo/final/cover.png",
+    };
+    const parts = buildPartsFromEvents([
+      { type: "tool:start", id: "t1", tool: "short_fiction_run" },
+      { type: "tool:end", id: "t1", result: "Short fiction completed.", details },
+    ]);
+
+    expect(parts[0].type).toBe("tool");
+    if (parts[0].type === "tool") {
+      expect(parts[0].execution.details).toEqual(details);
+    }
+  });
+
   it("localizes known tool errors", () => {
     const parts = buildPartsFromEvents([
       { type: "tool:start", id: "t1", tool: "sub_agent", agent: "writer" },

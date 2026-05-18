@@ -61,6 +61,11 @@ export function summarizeResult(result: unknown): string {
   return String(result).slice(0, 2000);
 }
 
+export function extractToolDetails(result: unknown): unknown {
+  if (!result || typeof result !== "object") return undefined;
+  return (result as Record<string, unknown>).details;
+}
+
 export function extractToolError(result: unknown): string {
   if (typeof result === "string") return localizeKnownRuntimeMessage(result).slice(0, 500);
   if (result && typeof result === "object") {

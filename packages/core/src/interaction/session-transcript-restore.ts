@@ -499,6 +499,7 @@ function messageEventsToInteractionMessages(events: MessageEvent[]): Interaction
       : undefined;
     const text = textFromContent(raw.content).trim();
     const isError = raw.isError === true;
+    const details = raw.details;
 
     return {
       id: toolCallId,
@@ -512,6 +513,7 @@ function messageEventsToInteractionMessages(events: MessageEvent[]): Interaction
         : text
           ? { result: text.slice(0, 200) }
           : {}),
+      ...(details !== undefined ? { details } : {}),
       startedAt: call?.timestamp ?? event.timestamp,
       completedAt: event.timestamp,
     };
