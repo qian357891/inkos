@@ -14,9 +14,9 @@ export function PlayChoicePanel(props: {
   return (
     <div className="shrink-0 border-t border-border/40 px-4 py-3">
       <div className="max-w-3xl mx-auto space-y-2">
-        {props.choices.map((choice) => (
+        {props.choices.map((choice, i) => (
           <button
-            key={choice}
+            key={`${i}-${choice}`}
             type="button"
             disabled={props.disabled}
             onClick={() => props.onChoose(choice)}
