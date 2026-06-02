@@ -2,6 +2,7 @@ import type { AgentContext } from "../agents/base.js";
 import {
   PlayActionIntentSchema,
   PlayMutationSchema,
+  type PlayEntity,
   type PlayActionIntent,
   type PlayActionIntentInput,
   type PlayMutation,
@@ -16,6 +17,7 @@ import {
 import { createPlayDB } from "./play-db-factory.js";
 import { applyPlayMutation, type PlayReducerDB } from "./play-reducer.js";
 import { PlayStore } from "./play-store.js";
+import type { PlayGraphSnapshot } from "./play-file-db.js";
 
 export interface PlayActionInterpreterLike {
   readonly interpret: (input: {
@@ -99,7 +101,7 @@ export class PlayRunner {
       sceneBrief: sceneBrief || (language === "en" ? "A new turn begins; carry over the current world state." : "新回合开始，沿用当前世界状态。"),
       language,
     }));
-    const context = await this.buildContextBrief(sceneBrief, language);
+    const context = await this.buildContextBrief(sceneBrief, language, world?.premise);
     const mutation = PlayMutationSchema.parse(await this.worldMutator.proposeMutation({
       turn,
       input: rawInput,
@@ -157,12 +159,17 @@ export class PlayRunner {
     };
   }
 
-  private async buildContextBrief(sceneBrief: string, language: "zh" | "en"): Promise<string> {
+  private async buildContextBrief(sceneBrief: string, language: "zh" | "en", worldPremise?: string): Promise<string> {
     const stateBrief = await this.readOptionalProjection("projections/state.md");
     const isEn = language === "en";
+    const premise = worldPremise?.trim();
+    const premiseLabel = isEn ? "World setting:" : "世界设定：";
     const sceneLabel = isEn ? "Current scene:" : "当前场景：";
     const stateLabel = isEn ? "Current state:" : "当前状态：";
+    const entityRoster = renderEntityRoster(readGraphSnapshot(this.db)?.entities ?? [], language);
     return [
+      premise ? `${premiseLabel}\n${premise}` : "",
+      entityRoster,
       sceneBrief ? `${sceneLabel}\n${sceneBrief}` : "",
       stateBrief ? `${stateLabel}\n${stateBrief}` : "",
     ].filter(Boolean).join("\n\n") || (isEn ? "No persisted state yet." : "暂无持久化状态。");
@@ -175,6 +182,40 @@ export class PlayRunner {
       return "";
     }
   }
+}
+
+function readGraphSnapshot(db: PlayReducerDB): PlayGraphSnapshot | null {
+  const maybeSnapshot = (db as { readonly snapshot?: unknown }).snapshot;
+  if (typeof maybeSnapshot !== "function") {
+    return null;
+  }
+  try {
+    return maybeSnapshot.call(db) as PlayGraphSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function renderEntityRoster(entities: ReadonlyArray<PlayEntity>, language: "zh" | "en"): string {
+  if (entities.length === 0) {
+    return "";
+  }
+  const isEn = language === "en";
+  const header = isEn
+    ? "Current entity roster (reuse these ids; do not recreate the same person/thing):"
+    : "当前实体名册（复用这些 id；不要把同一个人/物换新 id 重建）：";
+  const lines = entities.slice(0, 40).map((entity) => {
+    const detail = [entity.summary, entity.status ? `${isEn ? "status" : "状态"}: ${entity.status}` : ""]
+      .filter(Boolean)
+      .join(isEn ? "; " : "；");
+    return `- ${entity.id} [${entity.type}]: ${entity.label}${detail ? ` — ${clampRosterText(detail)}` : ""}`;
+  });
+  return [header, ...lines].join("\n");
+}
+
+function clampRosterText(value: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 120 ? `${compact.slice(0, 117)}...` : compact;
 }
 
 function renderStateBrief(input: {

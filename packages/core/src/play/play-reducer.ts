@@ -11,8 +11,10 @@ import {
   type PlayStateSlot,
   type PlayStateSlotInput,
 } from "../models/play.js";
+import type { PlayGraphSnapshot } from "./play-file-db.js";
 
 export interface PlayReducerDB {
+  readonly snapshot?: () => PlayGraphSnapshot;
   readonly transaction?: <T>(fn: () => T) => T;
   readonly getEntity: (id: string) => PlayEntity | null;
   readonly upsertEntity: (entity: PlayEntityInput) => void;
@@ -47,7 +49,7 @@ const EVIDENCE_ORDER: readonly PlayEvidenceStatus[] = [
 ];
 
 export function applyPlayMutation(input: ApplyPlayMutationInput): ApplyPlayMutationResult {
-  const mutation = PlayMutationSchema.parse(input.mutation);
+  const mutation = resolveEdgeEndpointLabels(input.db, PlayMutationSchema.parse(input.mutation));
   const event = PlayEventSchema.parse({
     id: mutation.eventId,
     turn: mutation.turn,
@@ -102,6 +104,65 @@ export function applyPlayMutation(input: ApplyPlayMutationInput): ApplyPlayMutat
   };
 
   return input.db.transaction ? input.db.transaction(apply) : apply();
+}
+
+type ParsedPlayMutation = ReturnType<typeof PlayMutationSchema.parse>;
+
+function resolveEdgeEndpointLabels(db: PlayReducerDB, mutation: ParsedPlayMutation): ParsedPlayMutation {
+  if (mutation.edges.upsert.length === 0) {
+    return mutation;
+  }
+  const labelToId = buildEntityAliasMap(db, mutation.entities.upsert);
+  if (labelToId.size === 0) {
+    return mutation;
+  }
+  const resolve = (value: string): string => labelToId.get(value.trim()) ?? value;
+  return {
+    ...mutation,
+    edges: {
+      ...mutation.edges,
+      upsert: mutation.edges.upsert.map((edge) => ({
+        ...edge,
+        fromId: resolve(edge.fromId),
+        toId: resolve(edge.toId),
+      })),
+    },
+  };
+}
+
+function buildEntityAliasMap(db: PlayReducerDB, turnEntities: ReadonlyArray<PlayEntityInput>): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  const add = (alias: string | undefined, id: string | undefined) => {
+    const a = alias?.trim();
+    const entityId = id?.trim();
+    if (!a || !entityId) return;
+    const existing = aliases.get(a);
+    if (existing && existing !== entityId) {
+      ambiguous.add(a);
+      aliases.delete(a);
+      return;
+    }
+    if (!ambiguous.has(a)) aliases.set(a, entityId);
+  };
+
+  for (const entity of readExistingEntities(db)) {
+    add(entity.id, entity.id);
+    add(entity.label, entity.id);
+  }
+  for (const entity of turnEntities) {
+    add(entity.id, entity.id);
+    add(entity.label, entity.id);
+  }
+  return aliases;
+}
+
+function readExistingEntities(db: PlayReducerDB): ReadonlyArray<PlayEntity> {
+  try {
+    return db.snapshot?.().entities ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function validateMutation(db: PlayReducerDB, mutation: ReturnType<typeof PlayMutationSchema.parse>): void {

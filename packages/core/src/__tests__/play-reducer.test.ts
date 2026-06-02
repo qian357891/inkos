@@ -57,6 +57,15 @@ class FakePlayDB {
   recordEvent(event: PlayEventInput): void {
     this.events.push(event);
   }
+
+  snapshot() {
+    return {
+      entities: [...this.entities.values()],
+      edges: [...this.edges.values()] as never[],
+      stateSlots: [...this.stateSlots.values()],
+      events: this.events as never[],
+    };
+  }
 }
 
 describe("applyPlayMutation", () => {
@@ -159,6 +168,39 @@ describe("applyPlayMutation", () => {
     expect(db.entities.size).toBe(2);           // entities applied
     expect(db.edges.get("good-edge")?.toId).toBe("clerk"); // valid edge kept
     expect(db.edges.has("bad-edge")).toBe(false);          // dangling edge dropped
+  });
+
+  it("resolves edge endpoints that reference existing entities by label", () => {
+    const db = new FakePlayDB();
+    db.upsertEntity({ id: "actor_afu", type: "actor", label: "阿福" });
+    db.upsertEntity({ id: "actor_laochen", type: "actor", label: "老陈" });
+
+    applyPlayMutation({
+      db,
+      mutation: {
+        eventId: "evt-4",
+        turn: 4,
+        actionKind: "say",
+        summary: "阿福试探老陈。",
+        edges: {
+          upsert: [{
+            id: "edge_ask",
+            fromId: "阿福",
+            type: "试探",
+            toId: "老陈",
+            validFromEventId: "evt-4",
+            sourceEventId: "evt-4",
+          }],
+        },
+      },
+      rawInput: "我问老陈旧账的事",
+    });
+
+    expect(db.edges.get("edge_ask")).toMatchObject({
+      fromId: "actor_afu",
+      toId: "actor_laochen",
+      type: "试探",
+    });
   });
 
   it("rejects evidence status regressions", () => {

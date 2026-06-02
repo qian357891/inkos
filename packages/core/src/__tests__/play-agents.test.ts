@@ -53,6 +53,28 @@ describe("play agents", () => {
     expect(mutation.entities.upsert).toEqual([]);
   });
 
+  it("uses placeholder examples in the Chinese mutator prompt instead of leaking concrete character names", async () => {
+    const agent = new PlayWorldMutatorAgent(ctx);
+    const chat = vi.spyOn(agent as unknown as { chat: PlayWorldMutatorAgent["chat"] }, "chat").mockResolvedValue({
+      content: JSON.stringify({ eventId: "evt-1", turn: 1, actionKind: "look" }),
+    } as never);
+
+    await agent.proposeMutation({
+      turn: 1,
+      input: "我问老陈",
+      action: { actionKind: "say", intent: "追问旧账" },
+      context: "当前实体名册：actor_afu [actor]: 阿福",
+      language: "zh",
+    });
+
+    const messages = chat.mock.calls[0]?.[0] as ReadonlyArray<{ readonly role: string; readonly content: string }>;
+    const system = messages.find((message) => message.role === "system")?.content ?? "";
+    expect(system).not.toContain("周野");
+    expect(system).not.toContain("账房先生");
+    expect(system).toContain("范例只示结构");
+    expect(system).toContain("不得复用");
+  });
+
   it("renders the applied state as prose plus suggested actions", async () => {
     const agent = new PlaySceneRendererAgent(ctx);
     vi.spyOn(agent as unknown as { chat: PlaySceneRendererAgent["chat"] }, "chat").mockResolvedValue({

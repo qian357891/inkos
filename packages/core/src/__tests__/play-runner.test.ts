@@ -14,6 +14,7 @@ import type {
 } from "../models/play.js";
 import { PlayRunner } from "../play/play-runner.js";
 import type { PlaySceneRender } from "../play/play-agents.js";
+import { PlayStore } from "../play/play-store.js";
 
 class FakePlayDB {
   entities = new Map<string, PlayEntity>();
@@ -52,6 +53,15 @@ class FakePlayDB {
 
   recordEvent(event: PlayEventInput): void {
     this.events.push(event);
+  }
+
+  snapshot() {
+    return {
+      entities: [...this.entities.values()],
+      edges: [...this.edges.values()] as never[],
+      stateSlots: [...this.stateSlots.values()],
+      events: this.events as never[],
+    };
   }
 }
 
@@ -173,5 +183,82 @@ describe("PlayRunner", () => {
     await expect(readFile(join(root, "worlds", "bad-turn", "runs", "run-1", "transcript.jsonl"), "utf-8"))
       .rejects
       .toThrow();
+  });
+
+  it("feeds the world premise and existing entity roster to the mutator so it can reuse ids", async () => {
+    const db = new FakePlayDB();
+    db.upsertEntity({
+      id: "actor_laochen",
+      type: "actor",
+      label: "老陈",
+      summary: "雨夜茶馆掌柜，知道镖队旧账。",
+      status: "戒备",
+      updatedEventId: "evt-0",
+    });
+    db.upsertEntity({
+      id: "org_tieshou_escort",
+      type: "organization",
+      label: "铁手镖队",
+      summary: "本地押镖组织，和旧账有关。",
+      status: "盘踞城南",
+      updatedEventId: "evt-0",
+    });
+    const store = new PlayStore(root);
+    await store.createWorld({
+      id: "rain-teahouse",
+      title: "雨夜茶馆",
+      premise: "玩家扮演阿福，雨夜茶馆跑堂，被一笔镖队旧账拖进江湖纠纷。",
+      language: "zh",
+    });
+    await store.ensureRun("rain-teahouse", "run-1");
+    await store.writeProjection("rain-teahouse", "run-1", "projections/scene.md", "雨夜茶馆里，老陈在柜台后拨算盘。\n");
+
+    const action: PlayActionIntentInput = {
+      actionKind: "say",
+      targetEntityLabel: "老陈",
+      intent: "问他旧账怎么回事",
+    };
+    const mutation: PlayMutationInput = {
+      eventId: "evt-1",
+      turn: 1,
+      actionKind: "say",
+      summary: "阿福向老陈追问镖队旧账。",
+      edges: {
+        upsert: [{
+          id: "edge_ask_laochen",
+          fromId: "actor_laochen",
+          type: "被追问",
+          toId: "org_tieshou_escort",
+          validFromEventId: "evt-1",
+          sourceEventId: "evt-1",
+        }],
+      },
+    };
+    let mutatorContext = "";
+    const proposeMutation = vi.fn(async (input: { readonly context: string }) => {
+      mutatorContext = input.context;
+      return mutation;
+    });
+
+    const runner = new PlayRunner({
+      projectRoot: root,
+      worldId: "rain-teahouse",
+      runId: "run-1",
+      store,
+      db,
+      agents: {
+        actionInterpreter: { interpret: vi.fn(async () => action) },
+        worldMutator: { proposeMutation },
+        sceneRenderer: { render: vi.fn(async () => ({ sceneText: "老陈指节一顿，算盘珠子碰出一声脆响。", suggestedActions: [] })) },
+      },
+    });
+
+    await runner.step("我压低声音问老陈，铁手镖队那笔旧账到底是谁欠的？");
+
+    expect(mutatorContext).toContain("世界设定");
+    expect(mutatorContext).toContain("阿福");
+    expect(mutatorContext).toContain("当前实体名册");
+    expect(mutatorContext).toContain("actor_laochen [actor]: 老陈");
+    expect(mutatorContext).toContain("org_tieshou_escort [organization]: 铁手镖队");
   });
 });
