@@ -14,9 +14,9 @@ import type { BookConfig } from "../models/book.js";
 //   (1) volume_outline.md mirror is NOT produced by the architect
 //       — readVolumeMap() still resolves through outline/volume_map.md
 //   (2) particle_ledger.md / subplot_board.md are NOT seeded by the architect
-//   (3) book_rules.md's YAML frontmatter now lives on story_frame.md; the
-//       legacy file becomes a compat shim, and readBookRules() prefers the
-//       new location
+//   (3) book_rules.md is the authoritative human-readable Markdown rules file;
+//       readBookRules() parses it into structured rules. Legacy story_frame
+//       YAML frontmatter remains readable only as a fallback.
 // ---------------------------------------------------------------------------
 
 const ZERO_USAGE = {
@@ -77,21 +77,19 @@ const SAMPLE_RESPONSE = [
   "从单打独斗到托付他人。",
   "",
   "=== SECTION: book_rules ===",
-  "---",
-  "version: \"1.0\"",
-  "protagonist:",
-  "  name: 主角甲",
-  "  personalityLock: [沉默, 执拗]",
-  "  behavioralConstraints: [不对长辈失礼]",
-  "prohibitions:",
-  "  - 不得美化体制暴力",
-  "chapterTypesOverride: []",
-  "fatigueWordsOverride: []",
-  "additionalAuditDimensions: []",
-  "enableFullCastTracking: false",
-  "---",
-  "## 叙事视角",
+  "## 主角",
+  "- 名字：主角甲",
+  "- 性格锁：沉默、执拗",
+  "- 行为约束：不对长辈失礼",
+  "",
+  "## 叙事人称",
   "第三人称单一视角。",
+  "",
+  "## 禁止混入",
+  "- 仙侠升级口吻",
+  "",
+  "## 禁止事项",
+  "- 不得美化体制暴力",
   "",
   "=== SECTION: current_state ===",
   "| 字段 | 值 |",
@@ -271,7 +269,7 @@ describe("Phase 5 cleanup (2) — architect no longer seeds runtime log files", 
   });
 });
 
-describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontmatter", () => {
+describe("Phase 5 cleanup (3) — book_rules is authoritative Markdown", () => {
   let bookDir: string;
 
   beforeEach(async () => {
@@ -283,7 +281,7 @@ describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontm
     vi.restoreAllMocks();
   });
 
-  it("writes the YAML frontmatter onto story_frame.md (not book_rules.md)", async () => {
+  it("writes prose-only story_frame.md and authoritative markdown book_rules.md", async () => {
     const agent = buildAgent();
     vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: SAMPLE_RESPONSE, usage: ZERO_USAGE });
@@ -292,24 +290,17 @@ describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontm
     await agent.writeFoundationFiles(bookDir, output, false, "zh");
 
     const storyFrame = await readFile(join(bookDir, "story/outline/story_frame.md"), "utf-8");
-    // story_frame.md now starts with YAML frontmatter
-    expect(storyFrame.trimStart().startsWith("---")).toBe(true);
-    expect(storyFrame).toContain("protagonist:");
-    expect(storyFrame).toContain("主角甲");
-    expect(storyFrame).toContain("prohibitions:");
-    // prose body still present
+    expect(storyFrame.trimStart().startsWith("---")).toBe(false);
     expect(storyFrame).toContain("主题与基调");
 
-    // book_rules.md is now a compat shim, not the full YAML file
-    const bookRulesShim = await readFile(join(bookDir, "story/book_rules.md"), "utf-8");
-    expect(bookRulesShim).toContain("兼容指针");
-    expect(bookRulesShim).toContain("story_frame.md");
-    // Shim carries the narrative body excerpt but not the YAML frontmatter
-    expect(bookRulesShim).toContain("叙事视角");
-    expect(bookRulesShim).not.toMatch(/^---\s*\nversion:/m);
+    const bookRules = await readFile(join(bookDir, "story/book_rules.md"), "utf-8");
+    expect(bookRules).toContain("## 主角");
+    expect(bookRules).toContain("主角甲");
+    expect(bookRules).toContain("## 禁止事项");
+    expect(bookRules.trimStart().startsWith("---")).toBe(false);
   });
 
-  it("readBookRules() prefers story_frame.md frontmatter and parses the rules", async () => {
+  it("readBookRules() parses authoritative markdown book_rules.md", async () => {
     const agent = buildAgent();
     vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: SAMPLE_RESPONSE, usage: ZERO_USAGE });
@@ -322,9 +313,10 @@ describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontm
     expect(parsed?.rules.protagonist?.name).toBe("主角甲");
     expect(parsed?.rules.protagonist?.personalityLock).toEqual(["沉默", "执拗"]);
     expect(parsed?.rules.prohibitions).toEqual(["不得美化体制暴力"]);
+    expect(parsed?.rules.narrativePerson).toBe("third");
   });
 
-  it("readBookRules() falls back to legacy book_rules.md when story_frame.md has no frontmatter", async () => {
+  it("readBookRules() still accepts legacy YAML book_rules.md", async () => {
     const storyDir = join(bookDir, "story");
     await mkdir(join(storyDir, "outline"), { recursive: true });
     // story_frame.md exists but has NO frontmatter (pre-cleanup book)
@@ -350,7 +342,7 @@ describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontm
     expect(parsed).toBeNull();
   });
 
-  it("planner-context readBookRules renders structured fields as a markdown block", async () => {
+  it("readBookRules() falls back to legacy story_frame.md frontmatter when book_rules.md is only a shim", async () => {
     const storyDir = join(bookDir, "story");
     await mkdir(join(storyDir, "outline"), { recursive: true });
     await writeFile(
@@ -359,18 +351,41 @@ describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontm
         "---",
         "version: \"1.0\"",
         "protagonist:",
-        "  name: 林辞",
-        "  personalityLock: [沉默, 执拗]",
-        "  behavioralConstraints: [不对长辈失礼]",
+        "  name: LegacyFrameHero",
+        "  personalityLock: [stoic]",
+        "  behavioralConstraints: []",
         "prohibitions:",
-        "  - 不得美化体制暴力",
-        "  - 不得神化主角",
+        "  - No lazy tropes",
         "---",
         "",
         "# Story Frame",
-        "",
-        "主题：测试",
-        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    await writeFile(
+      join(storyDir, "book_rules.md"),
+      "# Book Rules (compat pointer — deprecated)\n\n> This file is kept for external readers only.",
+      "utf-8",
+    );
+
+    const parsed = await readStructuredBookRules(bookDir);
+    expect(parsed?.rules.protagonist?.name).toBe("LegacyFrameHero");
+    expect(parsed?.rules.prohibitions).toEqual(["No lazy tropes"]);
+  });
+
+  it("planner-context readBookRules renders structured fields as a markdown block", async () => {
+    const storyDir = join(bookDir, "story");
+    await mkdir(storyDir, { recursive: true });
+    await writeFile(
+      join(storyDir, "book_rules.md"),
+      [
+        "## 主角",
+        "- 名字：林辞",
+        "- 性格锁：沉默、执拗",
+        "- 行为约束：不对长辈失礼",
+        "## 禁止事项",
+        "- 不得美化体制暴力",
+        "- 不得神化主角",
       ].join("\n"),
       "utf-8",
     );
@@ -382,6 +397,44 @@ describe("Phase 5 cleanup (3) — book_rules YAML moved to story_frame.md frontm
     expect(rendered).toContain("不得美化体制暴力");
     expect(rendered).toContain("不得神化主角");
     expect(rendered).toContain("不对长辈失礼");
+  });
+
+  it("readBookRules() extracts fanfic, numerical, and era constraints from markdown rules", async () => {
+    const storyDir = join(bookDir, "story");
+    await mkdir(storyDir, { recursive: true });
+    await writeFile(
+      join(storyDir, "book_rules.md"),
+      [
+        "## 主角",
+        "- 名字：林辞",
+        "- 性格锁：沉默、执拗",
+        "- 行为约束：不对长辈失礼",
+        "## 同人模式",
+        "- 模式：au",
+        "- 允许偏离：时间线提前、师徒关系改写",
+        "## 数值/资源规则",
+        "- 核心资源：灵力、功德",
+        "- 硬上限：筑基前不能御剑",
+        "## 年代限制",
+        "- 时期：2003 年春",
+        "- 地域：岭南小城",
+        "- 必须符合当年物价和通信条件",
+        "## 禁止事项",
+        "- 不得美化体制暴力",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const parsed = await readStructuredBookRules(bookDir);
+    expect(parsed?.rules.fanficMode).toBe("au");
+    expect(parsed?.rules.allowedDeviations).toEqual(["时间线提前", "师徒关系改写"]);
+    expect(parsed?.rules.numericalSystemOverrides?.resourceTypes).toEqual(["灵力", "功德"]);
+    expect(parsed?.rules.numericalSystemOverrides?.hardCap).toBe("筑基前不能御剑");
+    expect(parsed?.rules.eraConstraints).toEqual({
+      enabled: true,
+      period: "2003 年春",
+      region: "岭南小城",
+    });
   });
 
   it("planner-context readBookRules returns empty string when no rules source exists", async () => {

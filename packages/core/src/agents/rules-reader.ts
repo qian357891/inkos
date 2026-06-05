@@ -86,23 +86,21 @@ export function getBuiltinGenresDir(): string {
 }
 
 /**
- * Load the structured book rules (YAML frontmatter).
+ * Load structured book rules.
  *
- * Phase 5 cleanup #3: the YAML frontmatter now lives at the top of
- * outline/story_frame.md. For books initialized before that cleanup it may
- * still live in book_rules.md instead, so we fall back to that legacy path
- * when story_frame.md has no frontmatter (or no file at all).
- *
- * Phase 5 hotfix 2: when the source is story_frame.md, the prose body
- * underneath the frontmatter is NOT semantic "book rules" text — it is the
- * 5-section outline essay. We therefore slice out ONLY the frontmatter block
- * for parseBookRules, so ParsedBookRules.body ends up empty for new-layout
- * books. Legacy book_rules.md still carries narrow narrative rules in its
- * body, so we pass it through verbatim.
- *
- * Returns null only if NEITHER source yields parseable rules.
+ * New books keep the authoritative rules in story/book_rules.md as ordinary
+ * Markdown; parseBookRules() extracts the small structured surface the runtime
+ * needs and preserves the Markdown as body. Older Phase 5 books may still have
+ * YAML frontmatter on outline/story_frame.md with book_rules.md as a shim; that
+ * path is legacy fallback only.
  */
 export async function readBookRules(bookDir: string): Promise<ParsedBookRules | null> {
+  const rulesRaw = await tryReadFile(join(bookDir, "story/book_rules.md"));
+  if (rulesRaw) {
+    const parsed = parseBookRules(rulesRaw);
+    if (parsed) return parsed;
+  }
+
   const storyFrameRaw = await tryReadFile(join(bookDir, "story/outline/story_frame.md"));
   if (storyFrameRaw) {
     // Extract just the leading `---\n...\n---` block. Anything after it is
@@ -123,23 +121,13 @@ export async function readBookRules(bookDir: string): Promise<ParsedBookRules | 
     }
   }
 
-  const legacyRaw = await tryReadFile(join(bookDir, "story/book_rules.md"));
-  if (!legacyRaw) return null;
-  // Legacy file: body intentionally preserved (narrow narrative rules).
-  //
-  // Phase hotfix 1: parseBookRules now returns null if the file is a Phase 5
-  // compat shim (no YAML, only the architect-emitted pointer prose). In that
-  // case we surface a warning so callers don't silently fall back to default
-  // empty rules — the common new-book path where story_frame.md frontmatter
-  // is broken AND no legacy rules ever existed.
-  const parsed = parseBookRules(legacyRaw);
-  if (parsed === null) {
+  if (rulesRaw) {
     // eslint-disable-next-line no-console
     console.warn(
-      `[rules-reader] book_rules.md at ${bookDir}/story/book_rules.md is a Phase 5 compat shim with no authoritative rules — returning null instead of silently zeroing out rules. Fix the YAML frontmatter on outline/story_frame.md.`,
+      `[rules-reader] book_rules.md at ${bookDir}/story/book_rules.md is a compat shim and no legacy story_frame frontmatter was parseable — returning null instead of silently zeroing out rules.`,
     );
   }
-  return parsed;
+  return null;
 }
 
 export async function readBookLanguage(bookDir: string): Promise<"zh" | "en" | undefined> {

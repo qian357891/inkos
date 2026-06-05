@@ -50,10 +50,9 @@ export interface ParsedBookRules {
 }
 
 /**
- * Phase 5 cleanup #3: book_rules.md is now a compat pointer shim — the
- * authoritative YAML frontmatter lives on outline/story_frame.md. Detect a
- * shim by its architect-emitted heading + pointer line so we can avoid
- * treating it as a legitimate (default-empty) rules source.
+ * Legacy Phase 5 books may still contain a compat pointer instead of real
+ * rules. Detect that shim so callers can fall back to old story_frame
+ * frontmatter instead of treating the pointer as legitimate empty rules.
  *
  * Markers (must match buildBookRulesShim() in architect.ts):
  *   - 本书规则（兼容指针——已废弃） / Book Rules (compat pointer — deprecated)
@@ -93,10 +92,10 @@ export function parseBookRules(raw: string): ParsedBookRules | null {
     return null;
   }
 
-  // No valid frontmatter found and not a shim — return default rules with
-  // the raw content as body. Keeps backward compat for legacy book_rules.md
-  // files that hold only narrow narrative guidance prose.
-  const rules = BookRulesSchema.parse({});
+  // New layout: book_rules.md is ordinary Markdown. The model no longer has
+  // to emit YAML; the host extracts the small structured rule surface it needs
+  // and keeps the full Markdown as human-readable body.
+  const rules = parseMarkdownBookRules(stripped);
   return { rules, body: stripped.trim() };
 }
 
@@ -127,4 +126,188 @@ export function tryParseBookRulesFrontmatter(
     if (onError) onError(err);
     return null;
   }
+}
+
+function parseMarkdownBookRules(raw: string): BookRules {
+  const protagonistSection = extractMarkdownSection(raw, ["主角", "Protagonist"]);
+  const protagonistName =
+    readLabeledValue(protagonistSection, ["名字", "姓名", "name", "protagonist"])
+    ?? readLabeledValue(raw, ["主角", "protagonist"]);
+  const personalityLock = readLabeledList(protagonistSection, [
+    "性格锁",
+    "性格关键词",
+    "personalityLock",
+    "personality lock",
+    "core tags",
+  ]);
+  const behavioralConstraints = readLabeledList(protagonistSection, [
+    "行为约束",
+    "behavioralConstraints",
+    "behavioral constraints",
+  ]);
+
+  const genreSection = extractMarkdownSection(raw, ["题材锁", "Genre Lock", "Genre"]);
+  const primary = readLabeledValue(genreSection, ["主类型", "题材", "primary", "genre"]);
+  const forbidden = [
+    ...readLabeledList(genreSection, ["禁止混入", "禁混", "forbidden"]),
+    ...readMarkdownList(extractMarkdownSection(raw, ["禁止混入", "Forbidden Style Intrusions", "Forbidden"])),
+  ];
+
+  const prohibitions = readMarkdownList(extractMarkdownSection(raw, [
+    "禁止事项",
+    "禁忌",
+    "本书禁忌",
+    "Prohibitions",
+    "Do Not",
+  ]));
+  const fanficSection = extractMarkdownSection(raw, ["同人模式", "Fanfic Mode", "Fanfic"]);
+  const fanficMode = normalizeFanficMode(readLabeledValue(fanficSection, [
+    "模式",
+    "同人模式",
+    "fanficMode",
+    "fanfic mode",
+    "mode",
+  ]));
+  const allowedDeviations = readLabeledList(fanficSection, [
+    "允许偏离",
+    "允许的偏离",
+    "allowedDeviations",
+    "allowed deviations",
+  ]);
+
+  const numericalSection = extractMarkdownSection(raw, [
+    "数值/资源规则",
+    "数值规则",
+    "资源规则",
+    "Numerical / Resource Rules",
+    "Numerical Rules",
+    "Resource Rules",
+  ]);
+  const resourceTypes = readLabeledList(numericalSection, [
+    "核心资源",
+    "资源类型",
+    "resourceTypes",
+    "core resources",
+    "resources",
+  ]);
+  const hardCap = readLabeledValue(numericalSection, ["硬上限", "hardCap", "hard cap"]);
+
+  const eraSection = extractMarkdownSection(raw, ["年代限制", "时代限制", "Era Constraints"]);
+  const period = readLabeledValue(eraSection, ["时期", "年代", "period", "era"]);
+  const region = readLabeledValue(eraSection, ["地域", "地区", "region"]);
+
+  return BookRulesSchema.parse({
+    protagonist: protagonistName
+      ? {
+          name: protagonistName,
+          personalityLock,
+          behavioralConstraints,
+        }
+      : undefined,
+    genreLock: primary || forbidden.length > 0
+      ? {
+          primary: primary ?? "",
+          forbidden,
+        }
+      : undefined,
+    narrativePerson: detectNarrativePerson(raw),
+    numericalSystemOverrides: hardCap || resourceTypes.length > 0
+      ? {
+          hardCap,
+          resourceTypes,
+        }
+      : undefined,
+    eraConstraints: eraSection
+      ? {
+          enabled: true,
+          period,
+          region,
+        }
+      : undefined,
+    prohibitions,
+    fanficMode,
+    allowedDeviations,
+  });
+}
+
+function extractMarkdownSection(raw: string, headings: ReadonlyArray<string>): string {
+  const wanted = new Set(headings.map(normalizeHeading));
+  const lines = raw.split(/\r?\n/);
+  let collecting = false;
+  const out: string[] = [];
+
+  for (const line of lines) {
+    const heading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)?.[1];
+    if (heading) {
+      if (collecting) break;
+      collecting = wanted.has(normalizeHeading(heading));
+      continue;
+    }
+    if (collecting) out.push(line);
+  }
+
+  return out.join("\n").trim();
+}
+
+function readLabeledValue(raw: string, labels: ReadonlyArray<string>): string | undefined {
+  if (!raw.trim()) return undefined;
+  const labelPattern = labels.map(escapeRegExp).join("|");
+  const match = raw.match(new RegExp(`^\\s*(?:[-*]\\s*)?(?:${labelPattern})\\s*[:：]\\s*(.+?)\\s*$`, "im"));
+  const value = cleanScalar(match?.[1] ?? "");
+  return value || undefined;
+}
+
+function readLabeledList(raw: string, labels: ReadonlyArray<string>): string[] {
+  const value = readLabeledValue(raw, labels);
+  return value ? splitList(value) : [];
+}
+
+function readMarkdownList(raw: string): string[] {
+  if (!raw.trim()) return [];
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^[-*]\s+/.test(line))
+    .map((line) => cleanScalar(line.replace(/^[-*]\s+/, "")))
+    .filter((value) => value.length > 0);
+}
+
+function splitList(value: string): string[] {
+  const stripped = cleanScalar(value).replace(/^[\[(（【]\s*/, "").replace(/\s*[\])）】]$/, "");
+  return stripped
+    .split(/[、,，;；|]/)
+    .map(cleanScalar)
+    .filter((item) => item.length > 0);
+}
+
+function detectNarrativePerson(raw: string): "first" | "third" | undefined {
+  if (/第一人称|first[-\s]?person|\bfirst\b/i.test(raw)) return "first";
+  if (/第三人称|third[-\s]?person|\bthird\b/i.test(raw)) return "third";
+  return undefined;
+}
+
+function normalizeFanficMode(value: string | undefined): "canon" | "au" | "ooc" | "cp" | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "canon" || /正典|原作空白|原作视角/.test(value)) return "canon";
+  if (normalized === "au" || /平行|分歧|if线/i.test(value)) return "au";
+  if (normalized === "ooc" || /性格偏离/i.test(value)) return "ooc";
+  if (normalized === "cp" || /配对|感情线/i.test(value)) return "cp";
+  return undefined;
+}
+
+function cleanScalar(value: string): string {
+  const trimmed = value
+    .trim()
+    .replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "")
+    .trim();
+  return /^(?:无|none|n\/a|na|\(none\)|（无）|-|—)$/i.test(trimmed) ? "" : trimmed;
+}
+
+function normalizeHeading(value: string): string {
+  return value.replace(/[：:]\s*$/, "").trim().toLowerCase();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -32,7 +32,7 @@ import type { BookConfig } from "../models/book.js";
 //      budget entry).
 //   4. current_state section is NOT required in architect output — legacy
 //      outputs that still carry it are accepted.
-//   5. book_rules prompt tells the LLM "YAML only, no prose".
+//   5. book_rules prompt asks for ordinary Markdown, not YAML frontmatter.
 //   6. rhythm principles prompt allows mix of universal + concrete (≥3
 //      concretized, rest may stay universal).
 //   7. Legacy 7-section outputs still parse (backward compat).
@@ -154,19 +154,13 @@ const CONSOLIDATED_RESPONSE = [
   "被迫选择。",
   "",
   "=== SECTION: book_rules ===",
-  "---",
-  "version: \"1.0\"",
-  "protagonist:",
-  "  name: 林辞",
-  "  personalityLock: [沉默, 执拗]",
-  "  behavioralConstraints: [不对长辈失礼]",
-  "prohibitions:",
-  "  - 不得美化体制暴力",
-  "chapterTypesOverride: []",
-  "fatigueWordsOverride: []",
-  "additionalAuditDimensions: []",
-  "enableFullCastTracking: false",
-  "---",
+  "## 主角",
+  "- 名字：林辞",
+  "- 性格锁：沉默、执拗",
+  "- 行为约束：不对长辈失礼",
+  "",
+  "## 禁止事项",
+  "- 不得美化体制暴力",
   "",
   "=== SECTION: pending_hooks ===",
   "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 半衰期 | 备注 |",
@@ -234,7 +228,7 @@ describe("Phase 5 consolidation — 7→5 sections, prompt contract", () => {
     expect(system).toContain("story_frame ≤ 3000 chars");
     expect(system).toContain("volume_map ≤ 5000 chars");
     expect(system).toContain("roles 总 ≤ 8000 chars");
-    expect(system).toContain("book_rules ≤ 500 chars");
+    expect(system).toContain("book_rules ≤ 1000 chars");
     expect(system).toContain("pending_hooks ≤ 2000 chars");
     // current_state budget is gone — it's not a section any more.
     expect(system).not.toContain("current_state 500-800 chars");
@@ -278,13 +272,13 @@ describe("Phase 5 consolidation — 7→5 sections, prompt contract", () => {
     ]);
     expect(system).toContain("story_frame ≤ 3000 chars");
     expect(system).not.toContain("current_state 500-800 chars");
-    expect(system).toContain("YAML only");
+    expect(system).toContain("ordinary Markdown");
     // Rhythm universal allowance
     expect(system).toContain("At least 3 must be concretized for this book");
     expect(system).toContain("no deus ex machina");
   });
 
-  it("book_rules prompt block instructs YAML only, no prose", async () => {
+  it("book_rules prompt block instructs ordinary markdown, not YAML frontmatter", async () => {
     const agent = buildAgent();
     const chat = vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: CONSOLIDATED_RESPONSE, usage: ZERO_USAGE });
@@ -292,11 +286,12 @@ describe("Phase 5 consolidation — 7→5 sections, prompt contract", () => {
     await agent.generateFoundation(baseBook());
     const system = (chat.mock.calls[0]?.[0] as Array<{ content: string }>)[0]?.content ?? "";
 
-    expect(system).toContain("只输出 YAML frontmatter 一块——零散文");
-    // The pre-consolidation prompt used to ask for `## 叙事视角` AND
-    // `## 核心冲突驱动` prose blocks inside book_rules — those are gone.
-    expect(system).not.toMatch(/=== SECTION: book_rules ===[\s\S]*?## 叙事视角/);
-    expect(system).not.toMatch(/=== SECTION: book_rules ===[\s\S]*?## 核心冲突驱动/);
+    expect(system).toContain("输出普通 Markdown");
+    expect(system).toContain("不要 YAML frontmatter");
+    expect(system).toMatch(/=== SECTION: book_rules ===[\s\S]*?## 主角/);
+    expect(system).toMatch(/=== SECTION: book_rules ===[\s\S]*?## 禁止事项/);
+    expect(system).not.toContain("只输出 YAML frontmatter 一块——零散文");
+    expect(system).not.toContain("YAML only");
   });
 });
 
@@ -331,6 +326,24 @@ describe("Phase 5 consolidation — parser accepts 5-section output (current_sta
     expect(onDisk).toContain("建书时占位");
   });
 
+  it("accepts section markers when the model emits them as Markdown headings", async () => {
+    const markdownHeadingResponse = CONSOLIDATED_RESPONSE.replace(
+      /^=== SECTION:/gm,
+      "# === SECTION:",
+    );
+    const agent = buildAgent();
+    vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
+      .mockResolvedValue({ content: markdownHeadingResponse, usage: ZERO_USAGE });
+
+    const out = await agent.generateFoundation(baseBook());
+
+    expect(out.storyBible).toContain("主题与基调");
+    expect(out.volumeOutline).toContain("节奏原则");
+    expect(out.bookRules).toContain("## 主角");
+    expect(out.pendingHooks).toContain("H01");
+    expect(out.roles?.map((role) => role.name)).toContain("林辞");
+  });
+
   it("preserves legacy 7-section input (current_state + rhythm_principles still present)", async () => {
     const legacyResponse = [
       "=== SECTION: story_frame ===",
@@ -359,9 +372,10 @@ describe("Phase 5 consolidation — parser accepts 5-section output (current_sta
       "## 成长弧光",
       "从独行到托付。",
       "=== SECTION: book_rules ===",
-      "---",
-      "version: \"1.0\"",
-      "---",
+      "## 主角",
+      "- 名字：林辞",
+      "## 禁止事项",
+      "- 不得美化体制暴力",
       "",
       "## 叙事视角",
       "第三人称（legacy prose body — parser accepts but it no longer drives anything）",

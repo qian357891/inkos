@@ -157,7 +157,7 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
     expect(result?.body).toBe("");
   });
 
-  it("readBookRules falls back to legacy book_rules.md when story_frame frontmatter is broken", async () => {
+  it("readBookRules prefers valid book_rules.md and does not inspect broken story_frame frontmatter", async () => {
     const storyDir = join(bookDir, "story");
     await mkdir(join(storyDir, "outline"), { recursive: true });
     // Broken YAML (unterminated flow sequence)
@@ -166,7 +166,7 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
       "---\nprotagonist:\n  name: [broken\n  personalityLock: oops\n---\n\n# prose\n",
       "utf-8",
     );
-    // Valid legacy rules
+    // Valid rules file wins; story_frame frontmatter is legacy fallback only.
     await writeFile(
       join(storyDir, "book_rules.md"),
       [
@@ -190,10 +190,7 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
     expect(parsed?.rules.protagonist?.name).toBe("LegacyHero");
     expect(parsed?.rules.prohibitions).toEqual(["No lazy tropes"]);
     expect(parsed?.body).toContain("legacy body content");
-    // Warning was logged
-    expect(warnSpy).toHaveBeenCalled();
-    const warnMessage = String(warnSpy.mock.calls[0]?.[0] ?? "");
-    expect(warnMessage).toMatch(/story_frame\.md frontmatter is malformed/);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("readBookRules with broken story_frame frontmatter AND shim-only book_rules.md returns null (does NOT silently zero rules)", async () => {
@@ -223,7 +220,7 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
       .map((call) => String(call[0] ?? ""))
       .join("\n");
     expect(allWarnings).toMatch(/story_frame\.md frontmatter is malformed/);
-    expect(allWarnings).toMatch(/Phase 5 compat shim/);
+    expect(allWarnings).toMatch(/compat shim/);
   });
 
   it("readBookRules with broken frontmatter AND no legacy returns null (with warning)", async () => {
@@ -243,10 +240,10 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
     expect(warnSpy).toHaveBeenCalled();
   });
 
-  it("readBookRules prefers story_frame.md frontmatter over legacy when BOTH are valid", async () => {
+  it("readBookRules prefers book_rules.md over legacy story_frame.md frontmatter when BOTH are valid", async () => {
     const storyDir = join(bookDir, "story");
     await mkdir(join(storyDir, "outline"), { recursive: true });
-    // Valid story_frame frontmatter
+    // Valid legacy story_frame frontmatter
     await writeFile(
       join(storyDir, "outline/story_frame.md"),
       [
@@ -262,7 +259,7 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
       ].join("\n"),
       "utf-8",
     );
-    // Legacy file also present with different name — must be IGNORED
+    // Authoritative rules file also present with different name — must win.
     await writeFile(
       join(storyDir, "book_rules.md"),
       [
@@ -280,9 +277,8 @@ describe("Phase 5 hotfix 3 — broken frontmatter fallback", () => {
     );
 
     const parsed = await readBookRules(bookDir);
-    expect(parsed?.rules.protagonist?.name).toBe("NewHero");
-    expect(parsed?.body).toBe(""); // story_frame source → empty body
-    // No warning — story_frame was valid.
+    expect(parsed?.rules.protagonist?.name).toBe("OldHero");
+    expect(parsed?.body).toContain("legacy body");
     expect(warnSpy).not.toHaveBeenCalled();
   });
 });

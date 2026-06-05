@@ -22,7 +22,7 @@ import type { StoredHook } from "../state/memory-db.js";
 //   === SECTION: story_frame ===   4 散文段（主题 / 冲突 / 世界铁律+质感 / 终局）
 //   === SECTION: volume_map ===    5 散文段 + 尾段「6 条节奏原则（具体化 + 通用）」
 //   === SECTION: roles ===         一人一卡；主角卡承载完整弧线（起点→终点→代价）
-//   === SECTION: book_rules ===    仅 YAML frontmatter，零散文
+//   === SECTION: book_rules ===    普通 Markdown 规则卡，宿主负责结构化解析
 //   === SECTION: pending_hooks ===  13-column 表；可含 startChapter=0 种子行
 //
 // Consolidation rules (MUST reflect in prompt):
@@ -37,16 +37,16 @@ import type { StoredHook } from "../state/memory-db.js";
 //
 // Budget table (4 content items — LLM sections):
 //   story_frame ≤ 3000 chars / volume_map ≤ 5000 chars / roles 总 ≤ 8000 chars
-//   book_rules ≤ 500 chars (YAML only) / pending_hooks ≤ 2000 chars
+//   book_rules ≤ 1000 chars (Markdown rules card) / pending_hooks ≤ 2000 chars
 //
 // 输出落盘 contract（未变）：
-//   outline/story_frame.md      ← 4 prose sections + YAML frontmatter
+//   outline/story_frame.md      ← 4 prose sections
 //   outline/volume_map.md       ← 5 prose sections + 节奏原则尾段
 //   roles/主要角色/<name>.md    ← one file per major character
 //   roles/次要角色/<name>.md    ← one file per minor character
 //   story_bible.md              ← compat shim
 //   character_matrix.md         ← compat shim
-//   book_rules.md               ← compat shim
+//   book_rules.md               ← authoritative Markdown rules card
 //   current_state.md            ← seed 占位文件（运行时 consolidator 每章追加）
 //   pending_hooks.md            ← 架构师初始伏笔池
 //   emotional_arcs.md           ← runtime state
@@ -59,25 +59,6 @@ export interface ArchitectRole {
   readonly tier: "major" | "minor";
   readonly name: string;
   readonly content: string;
-}
-
-/**
- * Split a markdown string into its leading YAML frontmatter block and the
- * remaining body. Returns `frontmatter: null` when no frontmatter is present.
- * Only recognises a frontmatter block that starts on the FIRST non-empty
- * line — embedded `---` sections in prose are left alone.
- */
-function extractYamlFrontmatter(raw: string): { frontmatter: string | null; body: string } {
-  if (!raw) return { frontmatter: null, body: "" };
-  const stripped = raw.replace(/^```(?:md|markdown|yaml)?\s*\n/, "").replace(/\n```\s*$/, "");
-  const leadingMatch = stripped.match(/^\s*---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!leadingMatch) {
-    return { frontmatter: null, body: stripped };
-  }
-  return {
-    frontmatter: `---\n${leadingMatch[1]}\n---`,
-    body: leadingMatch[2].trim(),
-  };
 }
 
 export interface ArchitectOutput {
@@ -142,10 +123,10 @@ export class ArchitectAgent extends BaseAgent {
       : "";
 
     const numericalBlock = gp.numericalSystem
-      ? "- 有明确的数值/资源体系可追踪\n- 在 book_rules 中定义 numericalSystemOverrides（hardCap、resourceTypes）"
+      ? "- 有明确的数值/资源体系可追踪\n- 在 book_rules 中写清核心资源、硬上限和不可突破规则"
       : "- 本题材无数值系统，不需要资源账本";
     const powerBlock = gp.powerScaling ? "- 有明确的战力等级体系" : "";
-    const eraBlock = gp.eraResearch ? "- 需要年代考据支撑（在 book_rules 中设置 eraConstraints）" : "";
+    const eraBlock = gp.eraResearch ? "- 需要年代考据支撑（在 story_frame 中织入时代锚，在 book_rules 中写清不可违背的年代限制）" : "";
 
     const systemPrompt = resolvedLanguage === "en"
       ? this.buildEnglishFoundationPrompt(book, gp, genreBody, contextBlock, reviewFeedbackBlock, numericalBlock, powerBlock, eraBlock)
@@ -242,7 +223,7 @@ ${eraBlock}
 - story_frame ≤ 3000 chars
 - volume_map ≤ 5000 chars
 - roles 总 ≤ 8000 chars
-- book_rules ≤ 500 chars（仅 YAML）
+- book_rules ≤ 1000 chars（普通 Markdown 规则卡）
 - pending_hooks ≤ 2000 chars
 
 === SECTION: story_frame ===
@@ -358,28 +339,29 @@ name: <次要角色名>
 
 === SECTION: book_rules ===
 
-**只输出 YAML frontmatter 一块——零散文。** 所有的"叙事视角 / 本书专属规则 / 核心冲突驱动"等散文已经合并到 story_frame.世界观底色，不要在这里重复写。当且仅当用户在 brief 中明确指定了叙事人称时，在 frontmatter 里加一行 \`narrativePerson: first\`（第一人称）或 \`narrativePerson: third\`（第三人称）；用户没明确要求就不要加这一行，不要替用户默认人称。
-\`\`\`
----
-version: "1.0"
-protagonist:
-  name: (主角名)
-  personalityLock: [(3-5个性格关键词)]
-  behavioralConstraints: [(3-5条行为约束)]
-genreLock:
-  primary: ${book.genre}
-  forbidden: [(2-3种禁止混入的文风)]
-${gp.numericalSystem ? `numericalSystemOverrides:
-  hardCap: (根据设定确定)
-  resourceTypes: [(核心资源类型列表)]` : ""}
-prohibitions:
-  - (3-5条本书禁忌)
-chapterTypesOverride: []
-fatigueWordsOverride: []
-additionalAuditDimensions: []
-enableFullCastTracking: false
----
-\`\`\`
+输出普通 Markdown，不要 YAML frontmatter，不要 JSON，不要代码块。这里只写给运行时和写手都能读懂的规则卡，不写长篇散文；叙事视角、核心冲突驱动等长说明已经在 story_frame.世界观底色里写过，这里只保留可执行规则。
+
+## 主角
+- 名字：<主角名>
+- 性格锁：<3-5 个性格关键词，用顿号分隔>
+- 行为约束：<3-5 条主角不能违背的行为边界，用顿号分隔>
+
+## 题材锁
+- 主类型：${book.genre}
+- 禁止混入：<2-3 种禁止混入的文风/体系>
+
+## 叙事人称
+<只有当用户明确指定第一人称或第三人称时才写；没指定就写"无">
+
+${gp.numericalSystem ? `## 数值/资源规则
+- 核心资源：<核心资源类型>
+- 硬上限：<根据设定确定，不能随剧情突破>` : ""}
+
+${gp.eraResearch ? `## 年代限制
+- <2-3 条必须符合年代/政策/物价/社会环境的约束>` : ""}
+
+## 禁止事项
+- <3-5 条本书禁忌>
 
 === SECTION: pending_hooks ===
 
@@ -402,12 +384,12 @@ enableFullCastTracking: false
 - 主角人设鲜明、行为边界清晰
 - 伏笔前后呼应、配角有独立动机不是工具人
 - **story_frame / volume_map / roles 必须是散文密度，不要退化成 bullet**
-- **book_rules 只留 YAML，不要写散文**
+- **book_rules 用普通 Markdown 规则卡，不要 YAML/JSON/代码块，也不要写成长篇散文**
 - **不要输出 rhythm_principles 或 current_state 独立 section**——节奏原则合并进 volume_map 尾段；角色初始状态写在 roles.当前现状，初始钩子写在 pending_hooks（startChapter=0 行），环境/时代锚（仅历史/年代/都市重生等需要年份的题材）织进 story_frame.世界观底色，不要硬凑
 - **pending_hooks 表必须包含 Phase 7 扩展列——depends_on 标出因果链、pays_off_in_arc 锁定回收大致位置、core_hook 标记主线承重伏笔（3-7 条）、half_life 仅给重点伏笔设置**
 
 ## 硬性完结检查（生成前读一遍）
-必须依次输出全部 **5 个 SECTION 块**：story_frame → volume_map → roles → book_rules → pending_hooks，不允许因为 story_frame 或 volume_map 写长了就不写后 3 段。哪怕 roles 只列 3 个角色、book_rules 只有 YAML 小块、pending_hooks 只有 3 行，也要完整输出。只有写完 pending_hooks 最后一行才算交付。`;
+必须依次输出全部 **5 个 SECTION 块**：story_frame → volume_map → roles → book_rules → pending_hooks，不允许因为 story_frame 或 volume_map 写长了就不写后 3 段。哪怕 roles 只列 3 个角色、book_rules 只有 Markdown 小块、pending_hooks 只有 3 行，也要完整输出。只有写完 pending_hooks 最后一行才算交付。`;
   }
 
   private buildEnglishFoundationPrompt(
@@ -446,7 +428,7 @@ Do not duplicate the same fact across sections. The protagonist's arc lives only
 - story_frame ≤ 3000 chars
 - volume_map ≤ 5000 chars
 - roles ≤ 8000 chars total
-- book_rules ≤ 500 chars (YAML only)
+- book_rules ≤ 1000 chars (ordinary Markdown rules card)
 - pending_hooks ≤ 2000 chars
 
 === SECTION: story_frame ===
@@ -554,28 +536,29 @@ name: <minor name>
 
 === SECTION: book_rules ===
 
-**Output ONLY the YAML frontmatter block — zero prose.** All narrative guidance (perspective, book-specific rules, core conflict driver) has moved into story_frame.03_World_Tonal_Ground. Do not repeat it here. If and ONLY if the brief explicitly specifies a narrative person, add a line \`narrativePerson: first\` or \`narrativePerson: third\` to the frontmatter; if the user did not ask, do not add it — never pick a default person for them.
-\`\`\`
----
-version: "1.0"
-protagonist:
-  name: (protagonist name)
-  personalityLock: [(3-5 personality keywords)]
-  behavioralConstraints: [(3-5 behavioral constraints)]
-genreLock:
-  primary: ${book.genre}
-  forbidden: [(2-3 forbidden style intrusions)]
-${gp.numericalSystem ? `numericalSystemOverrides:
-  hardCap: (decide from setting)
-  resourceTypes: [(core resource types)]` : ""}
-prohibitions:
-  - (3-5 book-specific prohibitions)
-chapterTypesOverride: []
-fatigueWordsOverride: []
-additionalAuditDimensions: []
-enableFullCastTracking: false
----
-\`\`\`
+Output ordinary Markdown. Do NOT output YAML frontmatter, JSON, or code fences. This is a compact rules card readable by both runtime and writers; long narrative guidance already lives in story_frame.03_World_Tonal_Ground.
+
+## Protagonist
+- Name: <protagonist name>
+- Personality lock: <3-5 personality keywords, comma-separated>
+- Behavioral constraints: <3-5 behavioral boundaries>
+
+## Genre Lock
+- Primary: ${book.genre}
+- Forbidden: <2-3 forbidden style/system intrusions>
+
+## Narrative Person
+<Write first person or third person ONLY if the user explicitly requested it; otherwise write "none".>
+
+${gp.numericalSystem ? `## Numerical / Resource Rules
+- Core resources: <core resource types>
+- Hard cap: <setting-specific cap that cannot be broken by plot convenience>` : ""}
+
+${gp.eraResearch ? `## Era Constraints
+- <2-3 constraints tied to policy, prices, technology, or social environment>` : ""}
+
+## Prohibitions
+- <3-5 book-specific prohibitions>
 
 === SECTION: pending_hooks ===
 
@@ -598,12 +581,12 @@ Rules:
 - Protagonist persona clear with sharp behavioral boundaries
 - Hooks planted with payoff promises; supporting characters have independent motivation
 - **story_frame / volume_map / roles must be prose density — no bullet-list degradation**
-- **book_rules is YAML only — no prose body**
+- **book_rules is an ordinary Markdown rules card — no YAML, JSON, code fence, or long prose**
 - **Do NOT emit rhythm_principles or current_state as separate sections** — rhythm principles live in the last paragraph of volume_map; character initial status goes in roles.Current_State; initial hooks go in pending_hooks (start_chapter=0 rows); environment / era anchors (only when the genre has a real year) are woven into story_frame's world-tonal-ground paragraph
 - **pending_hooks table MUST carry Phase 7 extended columns — depends_on spells out the causal chain, pays_off_in_arc locks the approximate payoff location, core_hook marks main-line load-bearing hooks (3-7 per book), half_life only on priority hooks**
 
 ## Hard completeness check (read before generating)
-You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → roles → book_rules → pending_hooks. Do NOT stop after story_frame or volume_map just because they ran long. Even if roles lists only 3 characters, book_rules is a tiny YAML block, and pending_hooks has only 3 rows, all five must appear. The output is only considered delivered after the last row of pending_hooks is written.`;
+You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → roles → book_rules → pending_hooks. Do NOT stop after story_frame or volume_map just because they ran long. Even if roles lists only 3 characters, book_rules is a small Markdown block, and pending_hooks has only 3 rows, all five must appear. The output is only considered delivered after the last row of pending_hooks is written.`;
   }
 
   // -------------------------------------------------------------------------
@@ -648,7 +631,7 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
           "The previous draft is partially useful but is missing required SECTION blocks.",
           "Do not invent a new book. Preserve usable existing content and add the missing parts.",
           "Return the complete output with exactly these 5 SECTION blocks in order: story_frame, volume_map, roles, book_rules, pending_hooks.",
-          "book_rules must be YAML frontmatter only. pending_hooks must be a Markdown table.",
+          "book_rules must be ordinary Markdown, not YAML. pending_hooks must be a Markdown table.",
           "Do not explain the repair.",
         ].join("\n")
       : [
@@ -656,7 +639,7 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
           "上一轮草稿有可用内容，但缺少必需的 SECTION 块。",
           "不要重新发明一本书；保留已有可用内容，只补齐缺失部分并整理成完整输出。",
           "必须按顺序返回完整 5 段 SECTION：story_frame、volume_map、roles、book_rules、pending_hooks。",
-          "book_rules 只能是 YAML frontmatter；pending_hooks 必须是 Markdown 表格。",
+          "book_rules 必须是普通 Markdown，不要 YAML；pending_hooks 必须是 Markdown 表格。",
           "不要解释修复过程。",
         ].join("\n");
     const user = language === "en"
@@ -672,7 +655,7 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
 
   private parseSections(content: string, language: "zh" | "en"): ArchitectOutput {
     const parsedSections = new Map<string, string>();
-    const sectionPattern = /^\s*===\s*SECTION\s*[：:]\s*([^\n=]+?)\s*===\s*$/gim;
+    const sectionPattern = /^\s{0,3}(?:#{1,6}\s*)?===\s*SECTION\s*[：:]\s*([^\n=]+?)\s*===\s*(?:#+\s*)?$/gim;
     const matches = [...content.matchAll(sectionPattern)];
 
     for (let i = 0; i < matches.length; i++) {
@@ -808,20 +791,6 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
     return `# 角色矩阵（兼容指针——已废弃）\n\n> 本文件仅为外部读取保留。权威来源已迁移至 roles/ 文件夹（一人一卡）。\n\n## 主要角色\n\n${majorLines.join("\n") || "（无）"}\n\n## 次要角色\n\n${minorLines.join("\n") || "（无）"}\n`;
   }
 
-  private buildBookRulesShim(bookRulesBody: string, language: "zh" | "en"): string {
-    const trimmedBody = bookRulesBody.trim();
-    if (language === "en") {
-      const excerpt = trimmedBody
-        ? `\n\n## Narrative guidance excerpt\n\n${trimmedBody}\n`
-        : "";
-      return `# Book Rules (compat pointer — deprecated)\n\n> This file is kept for external readers only. The authoritative YAML frontmatter (protagonist / prohibitions / genreLock / ...) now lives at the top of outline/story_frame.md. readBookRules() prefers that location and only falls back here for books initialized before Phase 5 cleanup #3.${excerpt}`;
-    }
-    const excerpt = trimmedBody
-      ? `\n\n## 叙事指引摘录\n\n${trimmedBody}\n`
-      : "";
-    return `# 本书规则（兼容指针——已废弃）\n\n> 本文件仅为外部读取保留。权威 YAML frontmatter（protagonist / prohibitions / genreLock / ...）已迁移至 outline/story_frame.md 顶部。readBookRules() 优先读那里，只有 Phase 5 cleanup #3 之前的老书才会回退到本文件。${excerpt}`;
-  }
-
   // -------------------------------------------------------------------------
   // File writing
   // -------------------------------------------------------------------------
@@ -900,15 +869,7 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
       return;
     }
 
-    // Cleanup #3: book_rules YAML frontmatter is now the authoritative
-    // schema for structured fields (protagonist, prohibitions, …). We prepend
-    // it to story_frame.md so readers have one canonical place to look.
-    // book_rules.md becomes a compat shim.
-    const { frontmatter: bookRulesFrontmatter, body: bookRulesBody } =
-      extractYamlFrontmatter(output.bookRules);
-    const storyFrame = bookRulesFrontmatter
-      ? `${bookRulesFrontmatter}\n\n${storyFrameBody.trim()}\n`
-      : storyFrameBody;
+    const storyFrame = storyFrameBody.trim();
 
     // Phase 5 primary prose files
     writes.push(writeFile(join(outlineDir, "story_frame.md"), storyFrame, "utf-8"));
@@ -950,14 +911,7 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
     // outline/volume_map.md and falls back to legacy volume_outline.md for
     // books initialized before Phase 5.
 
-    // book_rules.md is now a compat shim — the authoritative YAML
-    // frontmatter lives on story_frame.md (cleanup #3). readBookRules()
-    // prefers story_frame.md but still falls back here for older books.
-    writes.push(writeFile(
-      join(storyDir, "book_rules.md"),
-      this.buildBookRulesShim(bookRulesBody, language),
-      "utf-8",
-    ));
+    writes.push(writeFile(join(storyDir, "book_rules.md"), output.bookRules.trim() + "\n", "utf-8"));
 
     // Runtime state files.
     // Phase 5 consolidation: the architect no longer emits a current_state
@@ -1137,8 +1091,8 @@ ${genreBody}
 
 - 主要角色必须来自原作正典
 - 可添加原创配角，标注"原创"
-- book_rules 的 fanficMode 必须设为 "${fanficMode}"
-- book_rules 只输出 YAML frontmatter，散文写进 story_frame.世界观底色
+- book_rules 用普通 Markdown 规则卡；必须写清同人模式：${fanficMode}
+- 长篇散文规则写进 story_frame.世界观底色，book_rules 只保留主角、题材锁、同人模式、禁止事项等可执行规则
 - 主角弧线只写在 roles/主要角色/<主角>.md，不在 story_frame 重复
 - 所有 outline 必须是散文密度`;
 
