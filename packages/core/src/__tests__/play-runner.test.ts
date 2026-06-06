@@ -94,6 +94,11 @@ describe("PlayRunner", () => {
           { id: "nav-stats", type: "evidence", label: "常用地址统计" },
         ],
       },
+      edges: {
+        upsert: [
+          { fromId: "player", type: "持有", toId: "nav-stats" },
+        ],
+      },
       stateSlots: {
         upsert: [{
           id: "pressure:player:danger",
@@ -117,6 +122,7 @@ describe("PlayRunner", () => {
       suggestedActions: ["继续看医院记录", "问徐晋安今晚去哪"],
     };
 
+    const renderSpy = vi.fn(async (_input: unknown) => render);
     const runner = new PlayRunner({
       projectRoot: root,
       worldId: "betrayal-car",
@@ -125,7 +131,7 @@ describe("PlayRunner", () => {
       agents: {
         actionInterpreter: { interpret: vi.fn(async () => action) },
         worldMutator: { proposeMutation: vi.fn(async () => mutation) },
-        sceneRenderer: { render: vi.fn(async () => render) },
+        sceneRenderer: { render: renderSpy },
       },
     });
 
@@ -135,6 +141,8 @@ describe("PlayRunner", () => {
     expect(result.suggestedActions).toEqual(["继续看医院记录", "问徐晋安今晚去哪"]);
     expect(db.events).toHaveLength(1);
     expect(db.entities.get("nav-stats")?.type).toBe("evidence");
+    const renderInput = renderSpy.mock.calls[0]?.[0] as { stateBrief: string } | undefined;
+    expect(renderInput?.stateBrief).toContain("player -[持有]-> nav-stats");
     expect(db.stateSlots.get("evidence:nav-stats:status")?.value).toMatchObject({ status: "seen" });
 
     const runDir = join(root, "worlds", "betrayal-car", "runs", "run-1");

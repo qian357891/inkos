@@ -28,6 +28,7 @@ export interface ComposeChapterInput {
   readonly plan: PlanChapterOutput;
   readonly contextBudget?: ContextBudget;
   readonly compressibleContextCompiler?: CompressibleContextCompiler;
+  readonly outlineSectionSelector?: OutlineSectionSelector;
 }
 
 export interface ContextBudget {
@@ -45,6 +46,22 @@ export interface CompressibleContextCompileRequest {
 }
 
 export type CompressibleContextCompiler = (request: CompressibleContextCompileRequest) => Promise<string>;
+
+export interface OutlineSectionSelectionRequest {
+  readonly fileName: string;
+  readonly kind: "story-frame" | "volume-map";
+  readonly chapterNumber: number;
+  readonly goal: string;
+  readonly outlineNode: string;
+  readonly language: "zh" | "en";
+  readonly candidates: ReadonlyArray<{
+    readonly source: string;
+    readonly heading: string;
+    readonly excerpt: string;
+  }>;
+}
+
+export type OutlineSectionSelector = (request: OutlineSectionSelectionRequest) => Promise<ReadonlyArray<string>>;
 
 export interface ComposeChapterOutput {
   readonly contextPackage: ContextPackage;
@@ -64,6 +81,7 @@ export async function composeGovernedChapter(input: ComposeChapterInput): Promis
     storyDir,
     input.plan,
     input.book.language ?? "zh",
+    input.outlineSectionSelector,
   );
   const initialContextPackage = ContextPackageSchema.parse({
     chapter: input.chapterNumber,
@@ -192,6 +210,31 @@ function renderContextEntries(entries: ContextPackage["selectedContext"]): strin
   ).join("\n\n");
 }
 
+function parseSelectedSources(raw: string): string[] {
+  const trimmed = raw.trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  const parse = (value: string): unknown => JSON.parse(value);
+  let parsed: unknown;
+  try {
+    parsed = parse(trimmed);
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start < 0 || end <= start) return [];
+    try {
+      parsed = parse(trimmed.slice(start, end + 1));
+    } catch {
+      return [];
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const values = (parsed as { selectedSources?: unknown }).selectedSources;
+  if (!Array.isArray(values)) return [];
+  return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
 export class ComposerAgent extends BaseAgent {
   get name(): string {
     return "composer";
@@ -204,7 +247,59 @@ export class ComposerAgent extends BaseAgent {
       contextBudget,
       compressibleContextCompiler: input.compressibleContextCompiler
         ?? (contextBudget ? (request) => this.compileCompressibleContext(request) : undefined),
+      outlineSectionSelector: input.outlineSectionSelector ?? ((request) => this.selectOutlineSections(request)),
     });
+  }
+
+  async selectOutlineSections(request: OutlineSectionSelectionRequest): Promise<ReadonlyArray<string>> {
+    if (request.candidates.length <= 1) {
+      return request.candidates.map((candidate) => candidate.source);
+    }
+    const isEn = request.language === "en";
+    const candidates = request.candidates.map((candidate, index) => [
+      `#${index + 1} ${candidate.source}`,
+      `heading: ${candidate.heading}`,
+      candidate.excerpt,
+    ].join("\n")).join("\n\n");
+    const system = isEn
+      ? [
+          "You are InkOS's semantic outline-section selector.",
+          "Select only the outline sections needed for the current chapter. Prefer semantic relevance over keyword overlap.",
+          "Return strict JSON only: {\"selectedSources\":[\"...\"]}. Use exact source ids from the candidates. If uncertain, include the safest relevant anchors rather than inventing ids.",
+        ].join("\n")
+      : [
+          "你是 InkOS 的语义大纲选段器。",
+          "只选择当前章节真正需要的大纲段落。按语义相关性判断，不要按关键词重合机械选择。",
+          "只返回严格 JSON：{\"selectedSources\":[\"...\"]}。必须使用候选里的精确 source id；不确定时选最安全的相关锚点，不要编造 id。",
+        ].join("\n");
+    const user = isEn
+      ? [
+          `File: ${request.fileName}`,
+          `Chapter: ${request.chapterNumber}`,
+          `Goal: ${request.goal}`,
+          `Outline node: ${request.outlineNode}`,
+          "",
+          "Candidates:",
+          candidates,
+        ].join("\n")
+      : [
+          `文件：${request.fileName}`,
+          `章节：第${request.chapterNumber}章`,
+          `目标：${request.goal}`,
+          `大纲节点：${request.outlineNode}`,
+          "",
+          "候选段落：",
+          candidates,
+        ].join("\n");
+    const response = await this.chat([
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ], {
+      temperature: 0.1,
+      maxTokens: 1024,
+    });
+    const allowed = new Set(request.candidates.map((candidate) => candidate.source));
+    return parseSelectedSources(response.content).filter((source) => allowed.has(source));
   }
 
   async compileCompressibleContext(request: CompressibleContextCompileRequest): Promise<string> {
@@ -272,6 +367,7 @@ async function collectSelectedContext(
   storyDir: string,
   plan: PlanChapterOutput,
   language: "zh" | "en",
+  outlineSectionSelector?: OutlineSectionSelector,
 ): Promise<ContextPackage["selectedContext"]> {
     const retrievalHints = deriveRetrievalHints(plan);
     const memoBodyExcerpt = plan.memo.body.trim();
@@ -313,17 +409,21 @@ async function collectSelectedContext(
       ...await maybeOutlineSectionSources(
         storyDir,
         "outline/story_frame.md",
-        "Preserve canon constraints referenced by the active chapter brief or hard constraints.",
-        plan,
-        "story-frame",
-      ),
+      "Preserve canon constraints referenced by the active chapter brief or hard constraints.",
+      plan,
+      "story-frame",
+      language,
+      outlineSectionSelector,
+    ),
       ...await maybeOutlineSectionSources(
         storyDir,
         "outline/volume_map.md",
-        "Anchor the default planning node for this chapter.",
-        plan,
-        "volume-map",
-      ),
+      "Anchor the default planning node for this chapter.",
+      plan,
+      "volume-map",
+      language,
+      outlineSectionSelector,
+    ),
     ];
     const canonEntries = await Promise.all([
       maybeContextSource(
@@ -593,6 +693,8 @@ async function maybeOutlineSectionSources(
   reason: string,
   plan: PlanChapterOutput,
   kind: "story-frame" | "volume-map",
+  language: "zh" | "en",
+  outlineSectionSelector?: OutlineSectionSelector,
 ): Promise<ContextPackage["selectedContext"]> {
     const path = join(storyDir, fileName);
     const content = await readFileOrDefault(path);
@@ -602,31 +704,37 @@ async function maybeOutlineSectionSources(
       if (!legacyFallback) return [];
       const legacyContent = await readFileOrDefault(join(storyDir, legacyFallback));
       if (!legacyContent || legacyContent === "(文件尚未创建)") return [];
-      return selectOutlineSectionEntries({
+      return await selectOutlineSectionEntries({
         fileName: legacyFallback,
         content: legacyContent,
         reason,
         plan,
         kind,
+        language,
+        outlineSectionSelector,
       });
     }
 
-    return selectOutlineSectionEntries({
+    return await selectOutlineSectionEntries({
       fileName,
       content,
       reason,
       plan,
       kind,
+      language,
+      outlineSectionSelector,
     });
 }
 
-function selectOutlineSectionEntries(params: {
+async function selectOutlineSectionEntries(params: {
   readonly fileName: string;
   readonly content: string;
   readonly reason: string;
   readonly plan: PlanChapterOutput;
   readonly kind: "story-frame" | "volume-map";
-}): ContextPackage["selectedContext"] {
+  readonly language: "zh" | "en";
+  readonly outlineSectionSelector?: OutlineSectionSelector;
+}): Promise<ContextPackage["selectedContext"]> {
     const sections = splitMarkdownSections(params.content);
     if (sections.length === 0) {
       return [{
@@ -643,6 +751,39 @@ function selectOutlineSectionEntries(params: {
         : isRelevantVolumeMapSection(section, hints, params.plan.intent.chapter),
     );
     const finalSections = selected.length > 0 ? selected : fallbackOutlineSections(sections, params.kind, params.plan.intent.chapter);
+    const candidates = sections.map((section) => ({
+      source: `story/${params.fileName}#${slugifyAnchor(section.heading)}`,
+      heading: section.heading,
+      excerpt: section.raw.trim(),
+    }));
+    if (params.outlineSectionSelector) {
+      try {
+        const selectedSources = await params.outlineSectionSelector({
+          fileName: params.fileName,
+          kind: params.kind,
+          chapterNumber: params.plan.intent.chapter,
+          goal: params.plan.intent.goal,
+          outlineNode: params.plan.intent.outlineNode ?? "",
+          language: params.language,
+          candidates,
+        });
+        const selectedSourceSet = new Set(selectedSources);
+        const llmSections = sections.filter((section) =>
+          selectedSourceSet.has(`story/${params.fileName}#${slugifyAnchor(section.heading)}`),
+        );
+        if (llmSections.length > 0) {
+          return dedupeBySource(llmSections.map((section) => ({
+            source: `story/${params.fileName}#${slugifyAnchor(section.heading)}`,
+            reason: params.reason,
+            excerpt: section.raw.trim(),
+          })));
+        }
+      } catch {
+        // Semantic section selection is quality guidance, not a hard dependency.
+        // If the provider flakes or returns malformed JSON, keep the deterministic
+        // fallback so chapter production does not stall.
+      }
+    }
     return dedupeBySource(finalSections.map((section) => ({
       source: `story/${params.fileName}#${slugifyAnchor(section.heading)}`,
       reason: params.reason,

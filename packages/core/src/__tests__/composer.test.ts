@@ -509,6 +509,57 @@ describe("ComposerAgent", () => {
     )).toBe(true);
   });
 
+  it("lets a semantic outline selector override keyword-based section selection", async () => {
+    await mkdir(join(storyDir, "outline"), { recursive: true });
+    await Promise.all([
+      writeFile(
+        join(storyDir, "outline", "story_frame.md"),
+        [
+          "# 故事框架",
+          "",
+          "## 一、世界观底色",
+          "这一段有世界观关键词，但不是本章要用的暗线。",
+          "",
+          "## 二、隐藏账册",
+          "这里承载导师债务的真正语义关联，虽然标题没有核心冲突、规则、终局等关键词。",
+        ].join("\n"),
+        "utf-8",
+      ),
+      writeFile(
+        join(storyDir, "outline", "volume_map.md"),
+        [
+          "# 分卷地图",
+          "",
+          "## 第4章 明线",
+          "普通追查。",
+          "",
+          "## 第4章 暗账",
+          "导师债务和隐藏账册在这一章真正合流。",
+        ].join("\n"),
+        "utf-8",
+      ),
+    ]);
+
+    const result = await composeGovernedChapter({
+      book,
+      bookDir,
+      chapterNumber: 4,
+      plan,
+      outlineSectionSelector: async (request) => request.fileName === "outline/story_frame.md"
+        ? ["story/outline/story_frame.md#二-隐藏账册"]
+        : ["story/outline/volume_map.md#第4章-暗账"],
+    });
+
+    const outlineText = result.contextPackage.selectedContext
+      .filter((entry) => entry.source.startsWith("story/outline/"))
+      .map((entry) => entry.excerpt ?? "")
+      .join("\n");
+    expect(outlineText).toContain("导师债务的真正语义关联");
+    expect(outlineText).toContain("导师债务和隐藏账册在这一章真正合流");
+    expect(outlineText).not.toContain("这一段有世界观关键词");
+    expect(outlineText).not.toContain("普通追查。");
+  });
+
   it("retrieves summary and hook evidence chunks instead of whole long memory files", async () => {
     await Promise.all([
       writeFile(

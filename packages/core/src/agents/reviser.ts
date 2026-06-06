@@ -664,6 +664,18 @@ function resolveAutoOutputMode(issues: ReadonlyArray<AuditIssue>): AutoOutputMod
   if (issues.length === 0) {
     return "allow-full";
   }
+  const scopedBlocking = issues.filter((issue) => issue.severity !== "info" && issue.repairScope);
+  if (scopedBlocking.length > 0) {
+    if (scopedBlocking.some((issue) => issue.repairScope === "structural")) {
+      return "rewrite-only";
+    }
+    if (
+      scopedBlocking.length === issues.filter((issue) => issue.severity !== "info").length
+      && scopedBlocking.every((issue) => issue.repairScope === "local")
+    ) {
+      return "patch-only";
+    }
+  }
 
   const isStructural = (issue: AuditIssue): boolean => {
     const text = `${issue.category} ${issue.description}`;

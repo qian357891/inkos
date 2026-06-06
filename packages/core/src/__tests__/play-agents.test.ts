@@ -71,6 +71,10 @@ describe("play agents", () => {
     const system = messages.find((message) => message.role === "system")?.content ?? "";
     expect(system).not.toContain("周野");
     expect(system).not.toContain("账房先生");
+    expect(system).not.toContain('"status":"seen"');
+    expect(system).not.toContain('"status":"collected"');
+    expect(system).toContain('"status":"已发现"');
+    expect(system).toContain('"status":"已收集"');
     expect(system).toContain("范例只示结构");
     expect(system).toContain("不得复用");
   });
@@ -141,6 +145,12 @@ describe("scene renderer prompt by mode", () => {
     const prompt = buildSceneRendererSystemPrompt("guided");
     expect(prompt).toContain("呼吸"); // presence is a valid, breathing turn
     expect(prompt).toContain("世界不是死的"); // world runs on its own clock
+  });
+
+  it("renderer treats applied typed state as the source of concrete facts", () => {
+    const prompt = buildSceneRendererSystemPrompt("guided");
+    expect(prompt).toContain("具体的新物件");
+    expect(prompt).toContain("必须先由 mutator 建成实体");
   });
 
   it("open 模式不强制选项数量", () => {

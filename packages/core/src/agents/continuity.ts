@@ -33,9 +33,15 @@ export interface AuditIssue {
   readonly category: string;
   readonly description: string;
   readonly suggestion: string;
+  readonly repairScope?: "local" | "structural" | "unknown";
 }
 
 type PromptLanguage = "zh" | "en";
+
+function normalizeRepairScope(value: unknown): AuditIssue["repairScope"] {
+  if (value === "local" || value === "structural" || value === "unknown") return value;
+  return undefined;
+}
 
 const DIMENSION_LABELS: Record<number, { readonly zh: string; readonly en: string }> = {
   1: { zh: "OOC检查", en: "OOC Check" },
@@ -466,6 +472,8 @@ Sparse chapter_memo is legitimate. Breather / aftermath / transition chapters ma
 
 If the chapter memo, rule stack, or supplied context specifies content proportions between lines (politics/romance, career/relationship, case/character, etc.), audit whether those lines appear as actual scenes, dialogue, action, or relationship movement. A line that is only summarized in one sentence counts as missing. Mark it critical only when the memo explicitly required it for this chapter.
 
+For every issue, set repair_scope as a typed routing hint: "local" for wording, paragraph shape, small repetition, or narrow sentence-level fixes; "structural" for plot drift, timeline break, missing scene/payoff, character logic collapse, POV/knowledge boundary failure, or anything requiring a rewritten scene/chapter; "unknown" only when you genuinely cannot decide.
+
 Audit dimensions:
 ${dimList}
 
@@ -474,12 +482,13 @@ Output format MUST be JSON:
   "passed": true/false,
   "overall_score": 0-100,
   "issues": [
-    {
-      "severity": "critical|warning|info",
-      "category": "dimension name",
-      "description": "specific issue description",
-      "suggestion": "fix suggestion"
-    }
+	    {
+	      "severity": "critical|warning|info",
+	      "repair_scope": "local|structural|unknown",
+	      "category": "dimension name",
+	      "description": "specific issue description",
+	      "suggestion": "fix suggestion"
+	    }
   ],
   "summary": "one-sentence audit conclusion"
 }
@@ -505,6 +514,8 @@ Score holistically — do not let a single minor issue tank the score.`
 
 如果章节备忘、规则栈或输入上下文明确指定多条剧情线的比例（权谋/感情、事业/恋爱、案件/人物等），要审它们是否真正落成了场景、对话、行动或关系变化。只用一句总结带过的线，视为缺失。只有当 memo 明确要求本章必须推进该线时，才标 critical。
 
+每条 issue 必须给 repair_scope 作为 typed 路由提示："local" 表示措辞、段落形状、小重复、句段级小修；"structural" 表示主线偏离、时间线断裂、场面/回报缺失、人物逻辑崩、视角/信息边界失败，或任何需要重写场景/整章的问题；只有确实无法判断时才写 "unknown"。
+
 审查维度：
 ${dimList}
 
@@ -513,12 +524,13 @@ ${dimList}
   "passed": true/false,
   "overall_score": 0-100,
   "issues": [
-    {
-      "severity": "critical|warning|info",
-      "category": "审查维度名称",
-      "description": "具体问题描述",
-      "suggestion": "修改建议"
-    }
+	    {
+	      "severity": "critical|warning|info",
+	      "repair_scope": "local|structural|unknown",
+	      "category": "审查维度名称",
+	      "description": "具体问题描述",
+	      "suggestion": "修改建议"
+	    }
   ],
   "summary": "一句话总结审查结论"
 }
@@ -684,12 +696,13 @@ ${chapterContent}`;
         while ((match = issuePattern.exec(issuesMatch[1]!)) !== null) {
           try {
             const issue = JSON.parse(match[0]);
-            issues.push({
-              severity: issue.severity ?? "warning",
-              category: issue.category ?? (language === "en" ? "Uncategorized" : "未分类"),
-              description: issue.description ?? "",
-              suggestion: issue.suggestion ?? "",
-            });
+	            issues.push({
+	              severity: issue.severity ?? "warning",
+	              category: issue.category ?? (language === "en" ? "Uncategorized" : "未分类"),
+	              description: issue.description ?? "",
+	              suggestion: issue.suggestion ?? "",
+	              repairScope: normalizeRepairScope(issue.repair_scope ?? issue.repairScope),
+	            });
           } catch {
             // skip malformed individual issue
           }
@@ -785,12 +798,13 @@ ${overrides}\n`;
       return {
         passed: Boolean(parsed.passed ?? false),
         issues: Array.isArray(parsed.issues)
-          ? parsed.issues.map((i: Record<string, unknown>) => ({
-              severity: (i.severity as string) ?? "warning",
-              category: (i.category as string) ?? (language === "en" ? "Uncategorized" : "未分类"),
-              description: (i.description as string) ?? "",
-              suggestion: (i.suggestion as string) ?? "",
-            }))
+	          ? parsed.issues.map((i: Record<string, unknown>) => ({
+	              severity: (i.severity as string) ?? "warning",
+	              category: (i.category as string) ?? (language === "en" ? "Uncategorized" : "未分类"),
+	              description: (i.description as string) ?? "",
+	              suggestion: (i.suggestion as string) ?? "",
+	              repairScope: normalizeRepairScope(i.repair_scope ?? i.repairScope),
+	            }))
           : [],
         summary: String(parsed.summary ?? ""),
         overallScore,

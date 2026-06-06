@@ -758,12 +758,13 @@ describe("ReviserAgent", () => {
         "原文。",
         1,
         [
-          {
-            severity: "critical",
-            category: "章节备忘偏离",
-            description: "未兑现 memo 的 goal",
-            suggestion: "重写全章",
-          },
+	          {
+	            severity: "critical",
+	            category: "模型审稿判断",
+	            description: "未兑现 memo 的 goal",
+	            suggestion: "重写全章",
+	            repairScope: "structural",
+	          },
         ],
         "auto",
         "xuanhuan",
@@ -831,12 +832,13 @@ describe("ReviserAgent", () => {
         "原文。",
         1,
         [
-          {
-            severity: "warning",
-            category: "高疲劳词",
-            description: "'不禁' 密度过高",
-            suggestion: "替换成具体动作",
-          },
+	          {
+	            severity: "warning",
+	            category: "模型审稿判断",
+	            description: "'不禁' 密度过高",
+	            suggestion: "替换成具体动作",
+	            repairScope: "local",
+	          },
         ],
         "auto",
         "xuanhuan",

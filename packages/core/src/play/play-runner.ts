@@ -234,6 +234,12 @@ function renderStateBrief(input: {
       lines.push(`- ${entity.id} [${entity.type}]: ${entity.label}${entity.summary ? ` — ${entity.summary}` : ""}`);
     }
   }
+  if (input.mutation.edges.upsert.length > 0) {
+    lines.push("", "## Edges");
+    for (const edge of input.mutation.edges.upsert) {
+      lines.push(`- ${edge.fromId} -[${edge.type}]-> ${edge.toId}`);
+    }
+  }
   if (input.mutation.stateSlots.upsert.length > 0) {
     lines.push("", "## State Slots");
     for (const slot of input.mutation.stateSlots.upsert) {

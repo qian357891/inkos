@@ -60,6 +60,7 @@ interface CoverConfigResponse {
 }
 
 const HOLDING_TYPES = new Set(["item", "evidence", "clue", "claim", "proof_chain"]);
+const HOLDING_EDGE_TYPES = new Set(["持有", "携带", "握有", "拿着", "holds", "holding", "carries", "carrying", "has"]);
 const HOLDING_GLYPH: Record<string, string> = {
   item: "🎒", evidence: "📄", clue: "🔍", claim: "💡", proof_chain: "🔗",
 };
@@ -79,10 +80,17 @@ function formatValue(value: unknown): string {
   }
 }
 
-function isHeldEntity(entity: PlayEntity): boolean {
+function isHoldingEdge(edge: PlayEdge): boolean {
+  return HOLDING_EDGE_TYPES.has(edge.type.trim().toLowerCase());
+}
+
+function isHeldEntity(entity: PlayEntity, currentEdges: ReadonlyArray<PlayEdge>): boolean {
   if (!HOLDING_TYPES.has(entity.type)) return false;
-  const text = `${entity.status ?? ""} ${entity.summary ?? ""}`.toLowerCase();
-  return /已收起|收起|拿着|握着|带在身上|随身|携带|持有|已获得|已拿到|收入|背包|物品栏|held|holding|carried|collected|obtained|in inventory/.test(text);
+  return currentEdges.some((edge) =>
+    edge.fromId === "actor_player"
+    && edge.toId === entity.id
+    && isHoldingEdge(edge)
+  );
 }
 
 interface HudDetail {
@@ -119,8 +127,12 @@ export function buildView(run: PlayRunResponse | null): HudView | null {
   const outcomeOf = new Map(events.map((e) => [e.id, e.outcomeSummary ?? ""]));
   const currentEdges = edges.filter((e) => e.validUntilEventId == null);
 
-  const summaryDetail = (e: PlayEntity): HudDetail[] =>
-    e.summary && e.summary.trim() ? [{ text: e.summary.trim() }] : [];
+  const summaryDetail = (e: PlayEntity): HudDetail[] => {
+    const summary = e.summary?.trim();
+    if (!summary) return [];
+    if (summary === e.label || summary === e.status) return [];
+    return [{ text: summary }];
+  };
   // All current relationships involving an entity, ids resolved to labels.
   const relationDetails = (id: string): HudDetail[] =>
     currentEdges
@@ -145,7 +157,7 @@ export function buildView(run: PlayRunResponse | null): HudView | null {
       imageUrl: e.imageUrl,
     }));
   const surroundings: HudRow[] = entities
-    .filter((e) => HOLDING_TYPES.has(e.type) && !isHeldEntity(e))
+    .filter((e) => HOLDING_TYPES.has(e.type) && !isHeldEntity(e, currentEdges))
     .map((e) => ({
       id: e.id,
       glyph: HOLDING_GLYPH[e.type] ?? "•",
@@ -155,7 +167,7 @@ export function buildView(run: PlayRunResponse | null): HudView | null {
       imageUrl: e.imageUrl,
     }));
   const holdings: HudRow[] = entities
-    .filter(isHeldEntity)
+    .filter((e) => isHeldEntity(e, currentEdges))
     .map((e) => ({
       id: e.id,
       glyph: HOLDING_GLYPH[e.type] ?? "•",
@@ -307,7 +319,7 @@ export function PlayHud(props: {
   }
 
   return (
-    <aside className="absolute right-0 top-0 z-20 flex h-full w-[330px] flex-col border-l border-border/40 bg-card/95 backdrop-blur shadow-xl">
+    <aside className="absolute bottom-28 right-0 top-0 z-20 flex w-[330px] flex-col border-l border-border/40 bg-card/95 backdrop-blur shadow-xl">
       <header className="flex items-center justify-between border-b border-border/40 px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-xs font-medium text-primary">

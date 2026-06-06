@@ -296,7 +296,7 @@ function buildWorldMutatorSystemPrompt(language: "zh" | "en"): string {
     "如果玩家动作无效或信息不足，blocked=true 并写 blockedReason。",
     "输出严格 JSON，必须符合 PlayMutation：eventId, turn, actionKind, summary, entities, edges, stateSlots, evidence, blocked, blockedReason, notes。",
     "下面的范例只示结构，不得复用范例里的 id、名称、人名或剧情事实到实际世界：",
-    `{"eventId":"evt-1","turn":1,"actionKind":"look","summary":"玩家角色发现了一个示例线索和一个示例道具。","entities":{"upsert":[{"id":"actor_player","type":"actor","label":"玩家角色","summary":"当前世界中玩家身份的占位示例；实际输出必须替换为本局真实实体。","status":"警觉","updatedEventId":"evt-1"},{"id":"actor_counterpart","type":"actor","label":"相关人物","summary":"当前世界中相关人物的占位示例；实际输出必须替换为本局真实实体。","status":"戒备","updatedEventId":"evt-1"},{"id":"evidence_sample_clue","type":"evidence","label":"示例线索","summary":"本回合发现的实物线索示例；实际输出必须替换为场景里的真实物件。","status":"seen","updatedEventId":"evt-1"},{"id":"item_sample_key","type":"item","label":"示例钥匙","summary":"本回合获得的实物道具示例；实际输出必须替换为场景里的真实物件。","status":"collected","updatedEventId":"evt-1"}]},"edges":{"upsert":[{"fromId":"actor_player","type":"怀疑","toId":"actor_counterpart"},{"fromId":"actor_player","type":"持有","toId":"item_sample_key"}]},"stateSlots":{"upsert":[{"id":"slot_sample_timer","kind":"timer","label":"示例倒计时","value":3,"updatedEventId":"evt-1"}]}}`,
+    `{"eventId":"evt-1","turn":1,"actionKind":"look","summary":"玩家角色发现了一个示例线索和一个示例道具。","entities":{"upsert":[{"id":"actor_player","type":"actor","label":"玩家角色","summary":"当前世界中玩家身份的占位示例；实际输出必须替换为本局真实实体。","status":"警觉","updatedEventId":"evt-1"},{"id":"actor_counterpart","type":"actor","label":"相关人物","summary":"当前世界中相关人物的占位示例；实际输出必须替换为本局真实实体。","status":"戒备","updatedEventId":"evt-1"},{"id":"evidence_sample_clue","type":"evidence","label":"示例线索","summary":"本回合发现的实物线索示例；实际输出必须替换为场景里的真实物件。","status":"已发现","updatedEventId":"evt-1"},{"id":"item_sample_key","type":"item","label":"示例钥匙","summary":"本回合获得的实物道具示例；实际输出必须替换为场景里的真实物件。","status":"已收集","updatedEventId":"evt-1"}]},"edges":{"upsert":[{"fromId":"actor_player","type":"怀疑","toId":"actor_counterpart"},{"fromId":"actor_player","type":"持有","toId":"item_sample_key"}]},"stateSlots":{"upsert":[{"id":"slot_sample_timer","kind":"timer","label":"示例倒计时","value":3,"updatedEventId":"evt-1"}]}}`,
   ].join("\n");
 }
 
@@ -336,6 +336,7 @@ export function buildSceneRendererSystemPrompt(mode: "open" | "guided" = "open",
     const base = [
       "You are an interactive-fiction scene-response author.",
       "Write the response only from the already-applied state; do not overturn the reducer's results.",
+      "Concrete new objects, clues, evidence, locations, organizations, or named people can only appear if they are already present in Applied changes or Current state summary. If the prose needs a new concrete thing, it must have been created by the mutator first; otherwise describe mood, pressure, or an unnamed detail instead.",
       "It should read like a playable novel — action, senses, pressure, breathing room — never a system log and never a menu-narration that herds the player into picking something.",
       "Stay strictly inside the world the premise established — era, place, tech level, genre tone must stay consistent. Never introduce elements that don't belong: a modern-city story must not grow night-watchmen / oil lamps; a historical/wuxia story must not sprout phones / cars / computers. Every detail lands inside the given world.",
       // Presence is a valid turn.
@@ -355,6 +356,7 @@ export function buildSceneRendererSystemPrompt(mode: "open" | "guided" = "open",
   const base = [
     "你是互动小说场景回应作者。",
     "你只能根据已经应用后的状态写回应，不要推翻 reducer 结果。",
+    "具体的新物件、线索、证据、地点、组织、具名人物，只能来自「已应用的本回合变化」或「当前状态摘要」。如果正文需要一个新的具体东西，它必须先由 mutator 建成实体；否则只写氛围、压力或不具名的细节。",
     "回应要像可玩的小说：有动作、感官、压迫、留白；绝不是系统日志，也绝不是把玩家往'快做个选择'上赶的菜单旁白。",
     "严格守住前提确立的那个世界——年代、地点、技术水平、题材基调都要一致。绝不要引入不属于它的元素：现代都市故事别冒出更夫/油灯/二更天，古代武侠故事别冒出手机/汽车/电脑。每一拍的细节都落在前提给定的那个世界里。",
     // 在场即合法
