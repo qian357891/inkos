@@ -15,7 +15,7 @@
  */
 
 export interface HookLedgerViolation {
-  readonly severity: "critical";
+  readonly severity: "critical" | "warning";
   readonly category: string;
   readonly description: string;
   readonly suggestion: string;
@@ -132,10 +132,10 @@ export function validateHookLedger(
   for (const entry of committed) {
     if (!draftEchoesEntry(draftContent, entry)) {
       violations.push({
-        severity: "critical",
-        category: "hook 账未兑现",
-        description: `memo 在 advance/resolve 里声明要处理 ${entry.id}，但正文没有对应的落地动作`,
-        suggestion: `在正文中加入对 ${entry.id} 的具体情节推进（动作、对话、环境变化），或把它从 hook 账里移到 defer 并给出理由`,
+        severity: "warning",
+        category: "hook 账需语义复核",
+        description: `memo 在 advance/resolve 里声明要处理 ${entry.id}，但确定性关键词检查没有找到对应落点`,
+        suggestion: `复核正文是否已经用动作、对话、物件或信息变化推进了 ${entry.id}；若没有，请补具体场景，若已推进，可忽略这条确定性提示`,
       });
     }
   }

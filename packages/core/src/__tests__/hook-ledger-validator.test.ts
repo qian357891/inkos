@@ -130,14 +130,26 @@ describe("validateHookLedger", () => {
     expect(violations).toEqual([]);
   });
 
-  it("flags a critical violation for each un-echoed advance/resolve entry", () => {
+  it("flags a warning for each un-echoed advance/resolve entry", () => {
     // Only 胖虎 (H007) present; 雷架/焦痕 (H012) and 杂役/腰牌 (H003) missing.
     const draft = "林秋只摸出胖虎借条，其他都没写。";
     const violations = validateHookLedger(ZH_MEMO, draft);
     expect(violations).toHaveLength(2);
-    expect(violations.every((v) => v.severity === "critical")).toBe(true);
+    expect(violations.every((v) => v.severity === "warning")).toBe(true);
     expect(violations.map((v) => v.description).join(" ")).toContain("H012");
     expect(violations.map((v) => v.description).join(" ")).toContain("H003");
+  });
+
+  it("does not turn semantic near-misses into critical failures", () => {
+    const memo = `## 本章 hook 账
+advance:
+- H002 "读数差额" → 主角找到抄表本撕页残留和数字342
+`;
+    const draft = "我在配电房地板上拨开碎纸屑，背面露出一排数字的下半截：342。旁边还有抄表本撕下来的毛边。";
+    const violations = validateHookLedger(memo, draft);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.severity).toBe("warning");
+    expect(violations[0]!.category).toContain("语义复核");
   });
 
   it("does NOT flag hooks that are only under defer", () => {
@@ -173,6 +185,7 @@ advance:
     const draft = "剧情涉及 H12 和 H123。";
     const violations = validateHookLedger(memo, draft);
     expect(violations).toHaveLength(1);
+    expect(violations[0]!.severity).toBe("warning");
     expect(violations[0]!.description).toContain("H1");
   });
 
