@@ -59,16 +59,20 @@ export class LengthNormalizerAgent extends BaseAgent {
     const wasTruncated = sanitizedContent !== input.chapterContent
       && sanitizedCount < input.lengthSpec.hardMin
       && this.looksTruncated(sanitizedContent);
-    const normalizedContent = wasTruncated ? input.chapterContent : sanitizedContent;
+    const crossedHardRange = sanitizedContent !== input.chapterContent
+      && this.crossesOppositeHardBound(originalCount, sanitizedCount, input.lengthSpec);
+    const normalizedContent = (wasTruncated || crossedHardRange) ? input.chapterContent : sanitizedContent;
     const finalCount = countChapterLength(normalizedContent, input.lengthSpec.countingMode);
     const warning = wasTruncated
       ? "Length normalizer output appeared truncated; kept original chapter."
+      : crossedHardRange
+        ? "Length normalizer output crossed the hard range; kept original chapter."
       : this.buildWarning(finalCount, input.lengthSpec);
 
     return {
       normalizedContent,
       finalCount,
-      applied: true,
+      applied: normalizedContent !== input.chapterContent,
       mode,
       warning,
       tokenUsage: response.usage,
@@ -134,6 +138,20 @@ ${input.chapterContent}`;
     }
 
     return `Final count ${finalCount} is outside the soft range ${lengthSpec.softMin}-${lengthSpec.softMax} after one normalization pass.`;
+  }
+
+  private crossesOppositeHardBound(
+    originalCount: number,
+    candidateCount: number,
+    lengthSpec: LengthSpec,
+  ): boolean {
+    if (originalCount > lengthSpec.hardMax && candidateCount < lengthSpec.hardMin) {
+      return true;
+    }
+    if (originalCount < lengthSpec.hardMin && candidateCount > lengthSpec.hardMax) {
+      return true;
+    }
+    return false;
   }
 
   private sanitizeNormalizedContent(rawContent: string, fallbackContent: string): string {

@@ -168,6 +168,56 @@ describe("runChapterReviewCycle v9", () => {
     expect(result.revised).toBe(true);
   });
 
+  it("does not let a higher-scoring hard-range failure displace an in-range draft", async () => {
+    const auditChapter = vi.fn()
+      .mockResolvedValueOnce(createAuditResult({
+        passed: false,
+        overallScore: 80,
+        issues: [{ severity: "warning", category: "pacing", description: "needs work", suggestion: "tighten" }],
+      }))
+      .mockResolvedValueOnce(createAuditResult({
+        passed: true,
+        overallScore: 95,
+        issues: [],
+      }));
+
+    const reviseChapter = vi.fn().mockResolvedValueOnce({
+      revisedContent: "x".repeat(80),
+      wordCount: 80,
+      fixedIssues: ["tightened"],
+      updatedState: "",
+      updatedLedger: "",
+      updatedHooks: "",
+      tokenUsage: ZERO_USAGE,
+    });
+
+    const normalizeDraftLengthIfNeeded = vi.fn()
+      .mockImplementation(async (content: string) => ({
+        content,
+        wordCount: content.length,
+        applied: false,
+        tokenUsage: ZERO_USAGE,
+      }));
+
+    const result = await runChapterReviewCycle({
+      ...baseParams,
+      initialOutput: {
+        content: "c".repeat(200),
+        wordCount: 200,
+        postWriteErrors: [],
+      },
+      createReviser: () => ({ reviseChapter }),
+      auditor: { auditChapter },
+      normalizeDraftLengthIfNeeded,
+      maxReviewIterations: 1,
+    });
+
+    expect(reviseChapter).toHaveBeenCalledTimes(1);
+    expect(result.finalContent).toBe("c".repeat(200));
+    expect(result.finalWordCount).toBe(200);
+    expect(result.auditResult.overallScore).toBe(80);
+  });
+
   it("defaults to one automatic repair pass", async () => {
     const auditChapter = vi.fn()
       .mockResolvedValueOnce(createAuditResult({

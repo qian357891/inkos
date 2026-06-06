@@ -39,6 +39,7 @@ interface ReviewSnapshot {
   readonly wordCount: number;
   readonly auditResult: AuditResult;
   readonly score: number;
+  readonly lengthInRange: boolean;
 }
 
 export async function runChapterReviewCycle(params: {
@@ -210,6 +211,7 @@ export async function runChapterReviewCycle(params: {
     wordCount: finalWordCount,
     auditResult: initial.auditResult,
     score: initial.score,
+    lengthInRange: initial.lengthInRange,
   }];
 
   let currentAudit = initial;
@@ -256,6 +258,7 @@ export async function runChapterReviewCycle(params: {
         wordCount: revisedWordCount,
         auditResult: nextAssessment.auditResult,
         score: nextAssessment.score,
+        lengthInRange: nextAssessment.lengthInRange,
       });
 
       // Check if passed
@@ -291,13 +294,20 @@ export async function runChapterReviewCycle(params: {
   // ---------------------------------------------------------------------------
   // Pick the best scoring snapshot for final output
   // ---------------------------------------------------------------------------
-  const bestSnapshot = snapshots.reduce((best, snap) =>
-    snap.score >= best.score + NET_IMPROVEMENT_EPSILON ? snap : best,
-  );
+  const bestSnapshot = snapshots.reduce((best, snap) => {
+    if (snap.lengthInRange !== best.lengthInRange) {
+      return snap.lengthInRange ? snap : best;
+    }
+    return snap.score >= best.score + NET_IMPROVEMENT_EPSILON ? snap : best;
+  });
 
   // If best snapshot differs from current content (repair made things worse
   // but an earlier version was better), roll back to the best version.
-  if (bestSnapshot.content !== finalContent && bestSnapshot.score >= currentAudit.score + NET_IMPROVEMENT_EPSILON) {
+  const shouldRestoreBestSnapshot = bestSnapshot.content !== finalContent && (
+    (bestSnapshot.lengthInRange && !currentAudit.lengthInRange)
+    || bestSnapshot.score >= currentAudit.score + NET_IMPROVEMENT_EPSILON
+  );
+  if (shouldRestoreBestSnapshot) {
     params.logWarn({
       zh: `回退到最高分版本（${bestSnapshot.score} 分 vs 当前 ${currentAudit.score} 分）`,
       en: `rolling back to highest-scoring version (${bestSnapshot.score} vs current ${currentAudit.score})`,
@@ -307,7 +317,7 @@ export async function runChapterReviewCycle(params: {
     currentAudit = {
       auditResult: bestSnapshot.auditResult,
       score: bestSnapshot.score,
-      lengthInRange: !isOutsideHardRange(bestSnapshot.wordCount, params.lengthSpec),
+      lengthInRange: bestSnapshot.lengthInRange,
     };
   }
 
