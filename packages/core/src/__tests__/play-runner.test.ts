@@ -252,6 +252,66 @@ describe("PlayRunner", () => {
       .toContain("无名婴儿照片");
   });
 
+  it("tells the opening seeder to turn already-held objects into holding edges", async () => {
+    const db = new FakePlayDB();
+    const store = new PlayStore(root);
+    await store.createWorld({
+      id: "opening-held-object",
+      title: "雨季合租屋",
+      premise: "玩家是刚搬来的住户，开场手里拿着房东给的备用钥匙。",
+      language: "zh",
+    });
+    await store.ensureRun("opening-held-object", "main");
+    await store.writeProjection("opening-held-object", "main", "projections/scene.md", "你站在门口，手里攥着备用钥匙。\n");
+
+    let mutatorInput = "";
+    const seedMutation: PlayMutationInput = {
+      eventId: "evt-0",
+      turn: 0,
+      actionKind: "look",
+      summary: "播种开场状态。",
+      entities: {
+        upsert: [
+          { id: "actor_player", type: "actor", label: "刚搬来的住户", summary: "手里攥着备用钥匙。", status: "警觉", updatedEventId: "evt-0" },
+          { id: "item_spare_key", type: "item", label: "备用钥匙", summary: "房东给的备用钥匙。", status: "已持有", updatedEventId: "evt-0" },
+        ],
+      },
+      edges: {
+        upsert: [
+          { id: "edge_actor_player_持有_item_spare_key", fromId: "actor_player", type: "持有", toId: "item_spare_key", value: { role: "holding" }, validFromEventId: "evt-0", sourceEventId: "evt-0" },
+        ],
+      },
+    };
+    const runner = new PlayRunner({
+      projectRoot: root,
+      worldId: "opening-held-object",
+      runId: "main",
+      store,
+      db,
+      agents: {
+        actionInterpreter: { interpret: vi.fn(async () => ({ actionKind: "look", intent: "开场播种" })) },
+        worldMutator: {
+          proposeMutation: vi.fn(async (input) => {
+            mutatorInput = input.input;
+            return seedMutation;
+          }),
+        },
+        sceneRenderer: { render: vi.fn(async () => ({ sceneText: "不会被调用", suggestedActions: [] })) },
+      },
+    });
+
+    await runner.seedOpening({
+      sceneText: "你站在门口，手里攥着备用钥匙。",
+      suggestedActions: [],
+    });
+
+    expect(mutatorInput).toContain("已成立状态");
+    expect(mutatorInput).toContain("actor_player");
+    expect(mutatorInput).toContain("value.role=\"holding\"");
+    expect(mutatorInput).toContain("不要把已持有实物只藏在玩家 summary");
+    expect([...db.edges.values()].some((edge) => edge.toId === "item_spare_key" && edge.value?.role === "holding")).toBe(true);
+  });
+
   it("does not persist a one-sided user transcript when mutation application fails", async () => {
     const db = new FakePlayDB();
     const runner = new PlayRunner({

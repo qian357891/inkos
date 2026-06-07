@@ -371,6 +371,7 @@ function buildOpeningSeedInput(input: {
     ? [
         "Seed only the state that already exists at the opening of this playable world.",
         "Do not advance time, do not solve the mystery, and do not narrate a new turn.",
+        "If the premise or opening scene says the player already holds, carries, keeps, wears, or starts with a tangible object, that object is already established: create its entity and add an actor_player holding edge. Do not hide held objects inside the player summary.",
         input.premise ? `Premise:\n${input.premise}` : "",
         `Opening scene:\n${input.sceneText}`,
         input.suggestedActions.length > 0 ? `Suggested player actions:\n${input.suggestedActions.map((action) => `- ${action}`).join("\n")}` : "",
@@ -378,6 +379,7 @@ function buildOpeningSeedInput(input: {
     : [
         "只播种这个互动世界开场已经成立的状态。",
         "不要推进时间，不要解谜，不要写新的回合剧情。",
+        "如果世界前提或开场正文说玩家已经拿着、带着、揣着、穿着、携带或开局拥有某个实物，这就是已成立状态：必须为该实物建立实体，并补一条 actor_player 指向它、value.role=\"holding\" 的持有边。不要把已持有实物只藏在玩家 summary 里。",
         input.premise ? `世界前提：\n${input.premise}` : "",
         `开场正文：\n${input.sceneText}`,
         input.suggestedActions.length > 0 ? `建议动作：\n${input.suggestedActions.map((action) => `- ${action}`).join("\n")}` : "",
