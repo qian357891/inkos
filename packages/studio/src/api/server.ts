@@ -82,7 +82,7 @@ import {
   type SessionKind,
 } from "@actalk/inkos-core";
 import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSafeBookId } from "./safety.js";
 import { ApiError } from "./errors.js";
 import { buildStudioBookConfig } from "./book-create.js";
@@ -256,6 +256,53 @@ function resolveProjectImageFile(root: string, rawPath: string): { readonly reso
     throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Invalid project file path");
   }
   return { resolved, contentType };
+}
+
+function normalizeProjectGeneratedPath(root: string, rawPath: string, code: string): { readonly relPath: string; readonly resolved: string } {
+  let relPath: string;
+  try {
+    relPath = decodeURIComponent(rawPath).replace(/^\/+/u, "");
+  } catch {
+    throw new ApiError(400, code, "Invalid project artifact path");
+  }
+
+  if (
+    !relPath
+    || relPath.includes("\0")
+    || isAbsolute(relPath)
+    || relPath.split(/[\\/]+/u).includes("..")
+  ) {
+    throw new ApiError(400, code, "Invalid project artifact path");
+  }
+
+  const allowedRoots = ["dramas/", "storyboards/", "interactive-films/", "shorts/", "covers/"];
+  if (!allowedRoots.some((prefix) => relPath.startsWith(prefix))) {
+    throw new ApiError(400, code, "Only generated writing artifacts can be opened");
+  }
+
+  const resolved = resolve(root, relPath);
+  const rel = relative(root, resolved);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new ApiError(400, code, "Invalid project artifact path");
+  }
+
+  return { relPath, resolved };
+}
+
+function resolveProjectTextArtifactFile(root: string, rawPath: string): { readonly relPath: string; readonly resolved: string; readonly contentType: string } {
+  const file = normalizeProjectGeneratedPath(root, rawPath, "INVALID_PROJECT_ARTIFACT_PATH");
+  const ext = file.relPath.split(".").pop()?.toLowerCase() ?? "";
+  const contentTypes: Record<string, string> = {
+    md: "text/markdown; charset=utf-8",
+    markdown: "text/markdown; charset=utf-8",
+    txt: "text/plain; charset=utf-8",
+    json: "application/json; charset=utf-8",
+  };
+  const contentType = contentTypes[ext];
+  if (!contentType) {
+    throw new ApiError(415, "UNSUPPORTED_PROJECT_ARTIFACT_TYPE", "Unsupported project artifact type");
+  }
+  return { ...file, contentType };
 }
 
 function isLikelyFailedToolResult(exec: CollectedToolExec): boolean {
@@ -2790,6 +2837,42 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     } catch {
       return c.notFound();
     }
+  });
+
+  app.get("/api/v1/project/artifacts/:file{.+}", async (c) => {
+    const file = resolveProjectTextArtifactFile(root, c.req.param("file"));
+
+    try {
+      const content = await readFile(file.resolved, "utf-8");
+      return c.json({
+        path: file.relPath,
+        content,
+        contentType: file.contentType,
+        size: Buffer.byteLength(content, "utf-8"),
+      });
+    } catch {
+      return c.notFound();
+    }
+  });
+
+  app.put("/api/v1/project/artifacts/:file{.+}", async (c) => {
+    const file = resolveProjectTextArtifactFile(root, c.req.param("file"));
+    const body = await c.req.json<unknown>().catch(() => null);
+    const content = body && typeof body === "object" && "content" in body
+      ? (body as { readonly content?: unknown }).content
+      : undefined;
+    if (typeof content !== "string") {
+      throw new ApiError(400, "INVALID_PROJECT_ARTIFACT_BODY", "content must be a string");
+    }
+
+    await mkdir(dirname(file.resolved), { recursive: true });
+    await writeFile(file.resolved, content, "utf-8");
+    return c.json({
+      ok: true,
+      path: file.relPath,
+      contentType: file.contentType,
+      size: Buffer.byteLength(content, "utf-8"),
+    });
   });
 
   // --- Config editing ---

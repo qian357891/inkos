@@ -218,6 +218,7 @@ export function getGeneratedArtifactDetails(exec: ToolExecution): GeneratedArtif
 }
 
 function ScriptStoryboardResultPreview({ exec }: { exec: ToolExecution }) {
+  const openProjectArtifact = useChatStore((s) => s.openProjectArtifact);
   if (!["script_create", "storyboard_create", "interactive_film_create"].includes(exec.tool) || exec.status !== "completed") return null;
   const details = getGeneratedArtifactDetails(exec);
   if (!details || (
@@ -242,9 +243,19 @@ function ScriptStoryboardResultPreview({ exec }: { exec: ToolExecution }) {
       </div>
       <div className="mt-2 space-y-1.5">
         {rows.map(([label, path]) => (
-          <div key={label} className="text-[13px] leading-5 text-muted-foreground break-all">
-            <span className="font-medium text-foreground">{label}：</span>{path}
-          </div>
+          <button
+            key={label}
+            type="button"
+            onClick={() => openProjectArtifact(path)}
+            className="group flex w-full items-start justify-between gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left transition hover:border-primary/25 hover:bg-background/65"
+          >
+            <span className="min-w-0 text-[13px] leading-5 text-muted-foreground break-all">
+              <span className="font-medium text-foreground">{label}：</span>{path}
+            </span>
+            <span className="mt-0.5 shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary opacity-80 transition group-hover:opacity-100">
+              查看
+            </span>
+          </button>
         ))}
       </div>
     </div>

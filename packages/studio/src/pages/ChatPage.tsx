@@ -21,6 +21,7 @@ import {
 import { ChatMessage } from "../components/chat/ChatMessage";
 import { QuickActions } from "../components/chat/QuickActions";
 import { ToolExecutionSteps, type ProposedActionDetails } from "../components/chat/ToolExecutionSteps";
+import { ProjectArtifactDrawer } from "../components/chat/ProjectArtifactDrawer";
 import { PlayHud } from "../components/chat/PlayHud";
 import { PlayChoicePanel } from "../components/chat/PlayChoicePanel";
 import { latestPlayChoiceSet } from "../components/chat/play-choices";
@@ -838,6 +839,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
           sessionTitle={activeSession?.title ?? null}
         />
       )}
+      <ProjectArtifactDrawer />
     </div>
   );
 }
