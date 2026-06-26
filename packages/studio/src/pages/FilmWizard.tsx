@@ -5,6 +5,7 @@ import type { SSEMessage } from "../hooks/use-sse";
 import { useNewSSEMessages } from "../hooks/use-sse";
 import { useColors } from "../hooks/use-colors";
 import { useApi } from "../hooks/use-api";
+import { AnalysisPanel } from "../components/film/AnalysisPanel";
 import {
   WIZARD_PHASES,
   computePhaseProgress,
@@ -20,16 +21,6 @@ import FlowView from "./FlowView";
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface ValidationReport {
-  ok: boolean;
-  issues: {
-    code: string;
-    level: "error" | "warning" | "info";
-    message: string;
-    nodeIds: string[];
-  }[];
-}
 
 // Superset of all sub-component Nav interfaces.
 interface Nav {
@@ -194,54 +185,6 @@ function ScalePlaceholderView({ c }: { c: Colors }) {
   );
 }
 
-function ValidateView({
-  validation,
-  c,
-}: {
-  validation: ValidationReport | null;
-  c: Colors;
-}) {
-  if (!validation) {
-    return <div className={`p-4 text-sm ${c.muted}`}>正在请求校验结果…</div>;
-  }
-
-  return (
-    <div className="p-4 max-w-2xl">
-      <div className="border rounded p-3" data-testid="validation-panel">
-        <div className={`text-sm font-medium ${c.muted}`}>
-          校验{validation.ok ? "" : "（有阻断问题）"}
-        </div>
-        {validation.issues.length === 0 ? (
-          <div className={`text-sm mt-1 ${c.muted}`}>无问题</div>
-        ) : (
-          <ul className="mt-1 space-y-1">
-            {validation.issues.map((issue, i) => (
-              <li
-                key={i}
-                data-testid={`validation-issue-${issue.code}`}
-                className="text-xs flex gap-2"
-              >
-                <span
-                  className={
-                    issue.level === "error"
-                      ? "text-red-500"
-                      : issue.level === "warning"
-                      ? "text-amber-500"
-                      : "text-muted-foreground"
-                  }
-                >
-                  [{issue.level}]
-                </span>
-                <span>{issue.message}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Main wizard component
 // ---------------------------------------------------------------------------
@@ -259,22 +202,17 @@ export default function FilmWizard({
   const [showPreview, setShowPreview] = useState(false);
 
   const { data: graph, refetch: refetchGraph } = useApi<StoryGraph>(`/projects/${projectId}/story-graph`);
-  const { data: validation, refetch: refetchValidation } = useApi<ValidationReport>(
-    `/projects/${projectId}/story-graph/validation`,
-  );
 
   useEffect(() => {
     void refetchGraph();
-    void refetchValidation();
-  }, [phase, refetchGraph, refetchValidation]);
+  }, [phase, refetchGraph]);
 
   const handleSseMessage = useCallback((msg: SSEMessage) => {
     if (msg.event !== "agent:complete") return;
     const data = msg.data as { activeBookId?: string } | null;
     if (data?.activeBookId !== projectId) return;
     void refetchGraph();
-    void refetchValidation();
-  }, [projectId, refetchGraph, refetchValidation]);
+  }, [projectId, refetchGraph]);
 
   useNewSSEMessages(sse.messages, handleSseMessage);
 
@@ -379,7 +317,6 @@ export default function FilmWizard({
           t={t}
           sse={sse}
           graph={graph}
-          validation={validation}
           c={c}
         />
       </div>
@@ -401,7 +338,6 @@ interface MainAreaProps {
   t: TFunction;
   sse: { messages: ReadonlyArray<SSEMessage>; connected: boolean };
   graph: StoryGraph | null;
-  validation: ValidationReport | null;
   c: Colors;
 }
 
@@ -415,7 +351,6 @@ function MainArea({
   t,
   sse,
   graph,
-  validation,
   c,
 }: MainAreaProps) {
   if (showPreview) {
@@ -472,7 +407,7 @@ function MainArea({
   }
 
   if (phase === "validate") {
-    return <ValidateView validation={validation} c={c} />;
+    return <AnalysisPanel projectId={projectId} theme={theme} />;
   }
 
   return null;
