@@ -80,6 +80,8 @@ import {
   applyGraphDelta,
   loadStoryGraph,
   reviewStoryGraph,
+  analyzeEmotionalArcs,
+  analyzePathDistribution,
   generateNodeImage,
   defaultNodeImageDeps,
   type NodeImageDeps,
@@ -5217,6 +5219,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
     }
     return c.json(reviewStoryGraph(graph));
+  });
+
+  app.get("/api/v1/projects/:id/story-graph/analysis", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    const graph = await loadStoryGraph(root, id);
+    if (!graph) return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+    return c.json({ report: reviewStoryGraph(graph), arcs: analyzeEmotionalArcs(graph), distribution: analyzePathDistribution(graph) });
   });
 
   app.post("/api/v1/projects/:id/nodes/:nodeId/image", async (c) => {
