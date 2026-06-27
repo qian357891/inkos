@@ -253,7 +253,7 @@ export default function FlowView({
   if (loading) return <div className={c.muted}>{t("common.loading")}</div>;
   if (error)
     return (
-      <div className="text-red-400">
+      <div className="text-destructive">
         {t("common.error")}: {error}
       </div>
     );
@@ -288,7 +288,7 @@ export default function FlowView({
         )}
       </div>
       {editError && (
-        <div data-testid="flow-edit-error" className="text-red-400 text-xs">
+        <div data-testid="flow-edit-error" className="text-destructive text-xs">
           {editError}
         </div>
       )}

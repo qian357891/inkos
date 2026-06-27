@@ -35,7 +35,7 @@ export function StoryGraphTree({
   const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   if (loading) return <div className={c.muted}>{t("common.loading")}</div>;
-  if (error) return <div className="text-red-400">{t("common.error")}: {error}</div>;
+  if (error) return <div className="text-destructive">{t("common.error")}: {error}</div>;
   if (!graph) return null;
   const exportUrl = buildProjectExportDownloadUrl(projectId);
 
@@ -43,7 +43,7 @@ export function StoryGraphTree({
     setGeneratingId(nodeId);
     setSaveError(null);
     try {
-      await fetchJson(`/projects/${projectId}/nodes/${nodeId}/image`, { method: "POST" });
+      await fetchJson(`/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/image`, { method: "POST" });
       await refetch();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -102,7 +102,7 @@ export function StoryGraphTree({
           <a
             href={exportUrl}
             download
-            className="px-3 py-1 rounded bg-slate-700 text-white"
+            className={`px-3 py-1 rounded ${c.btnSecondary}`}
             data-testid="film-export-package"
           >
             导出整包
@@ -113,7 +113,7 @@ export function StoryGraphTree({
       <AnalysisPanel projectId={projectId} theme={theme} />
 
       {saveError && (
-        <div className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-400" data-testid="film-save-error">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="film-save-error">
           保存失败：{saveError}
         </div>
       )}
