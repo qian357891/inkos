@@ -4258,6 +4258,7 @@ describe("PipelineRunner", () => {
   it("feeds hook health warnings back into pipeline audit and dedicated drift guidance", async () => {
     const { root, runner, state, bookId } = await createRunnerFixture();
     const storyDir = join(state.bookDir(bookId), "story");
+    const now = "2026-03-19T00:00:00.000Z";
 
     await Promise.all([
       writeFile(join(storyDir, "current_state.md"), createStateCard({
@@ -4269,6 +4270,30 @@ describe("PipelineRunner", () => {
       }), "utf-8"),
       writeFile(join(storyDir, "pending_hooks.md"), "# Pending Hooks\n", "utf-8"),
       writeFile(join(storyDir, "chapter_summaries.md"), "# Chapter Summaries\n", "utf-8"),
+      writeFile(join(state.bookDir(bookId), "chapters", "0001_旧路.md"), "# 第1章 旧路\n\n城门在晨雾里半开。林越顺着石阶慢慢往里走。", "utf-8"),
+      writeFile(join(state.bookDir(bookId), "chapters", "0002_暗巷.md"), "# 第2章 暗巷\n\n午后的风掠过墙头。林越没有回头，只是沿着阴影继续向前。", "utf-8"),
+    ]);
+    await state.saveChapterIndex(bookId, [
+      {
+        number: 1,
+        title: "旧路",
+        status: "ready-for-review",
+        wordCount: 27,
+        createdAt: now,
+        updatedAt: now,
+        auditIssues: [],
+        lengthWarnings: [],
+      },
+      {
+        number: 2,
+        title: "暗巷",
+        status: "ready-for-review",
+        wordCount: 29,
+        createdAt: now,
+        updatedAt: now,
+        auditIssues: [],
+        lengthWarnings: [],
+      },
     ]);
 
     vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
@@ -4308,11 +4333,12 @@ describe("PipelineRunner", () => {
       const driftFile = await readFile(join(storyDir, "audit_drift.md"), "utf-8");
       const currentState = await readFile(join(storyDir, "current_state.md"), "utf-8");
       const savedIndex = await state.loadChapterIndex(bookId);
+      const persistedChapter = savedIndex.find((chapter) => chapter.number === result.chapterNumber);
 
       expect(result.auditResult.issues.some((issue) => issue.category === "伏笔债务")).toBe(true);
       expect(driftFile).toContain("伏笔债务");
       expect(currentState).not.toContain("伏笔债务");
-      expect(savedIndex[0]?.auditIssues).toEqual(
+      expect(persistedChapter?.auditIssues).toEqual(
         expect.arrayContaining([
           expect.stringContaining("活跃伏笔过多"),
         ]),
