@@ -32,6 +32,7 @@ const resolveSessionActiveBookMock = vi.fn();
 const runAgentSessionMock = vi.fn();
 const abortAgentSessionMock = vi.fn();
 const rewindSessionToMessageIndexMock = vi.fn();
+const reclaimStaleBookLocksMock = vi.fn();
 const playRunnerStepMock = vi.fn();
 const playRunnerCtorArgs: unknown[] = [];
 const generatePlayImageMock = vi.fn();
@@ -173,6 +174,10 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
 
     async ensureControlDocuments(): Promise<void> {
       // no-op in tests
+    }
+
+    async reclaimStaleBookLocks(): Promise<number> {
+      return await reclaimStaleBookLocksMock();
     }
 
     bookDir(id: string): string {
@@ -517,6 +522,7 @@ describe("createStudioServer daemon lifecycle", () => {
     runAgentSessionMock.mockReset();
     abortAgentSessionMock.mockReset();
     rewindSessionToMessageIndexMock.mockReset();
+    reclaimStaleBookLocksMock.mockReset();
     playRunnerStepMock.mockReset();
     playRunnerCtorArgs.length = 0;
     playRunnerStepMock.mockResolvedValue({
@@ -4539,6 +4545,70 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(ok.json()).resolves.toMatchObject({ status: "creating", bookId: "仿写新书" });
     await vi.waitFor(() => expect(initImitationBookMock).toHaveBeenCalledTimes(1));
     expect(initImitationBookMock.mock.calls[0]?.[2]).toBe("一个原创故事");
+  });
+
+  describe("stale-lock watchdog on daemon startup", () => {
+    async function flushMicrotasks(): Promise<void> {
+      // The watchdog runs as a fire-and-forget promise after the app is
+      // constructed; give the microtask queue a few cycles to settle.
+      for (let i = 0; i < 5; i += 1) {
+        await Promise.resolve();
+      }
+    }
+
+    it("invokes reclaimStaleBookLocks exactly once on startup", async () => {
+      reclaimStaleBookLocksMock.mockResolvedValueOnce(0);
+      const { createStudioServer } = await import("./server.js");
+      createStudioServer(cloneProjectConfig() as never, root);
+      await flushMicrotasks();
+      expect(reclaimStaleBookLocksMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs a single info line when stale locks were reclaimed", async () => {
+      reclaimStaleBookLocksMock.mockResolvedValueOnce(3);
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      const { createStudioServer } = await import("./server.js");
+      createStudioServer(cloneProjectConfig() as never, root);
+      await flushMicrotasks();
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[studio]"),
+      );
+      const cleaned = infoSpy.mock.calls.find((call) =>
+        String(call[0]).includes("stale book lock"),
+      );
+      expect(cleaned, "should emit a startup cleanup log").toBeDefined();
+      expect(String(cleaned?.[0])).toMatch(/Cleaned\s+3\s+stale/);
+      infoSpy.mockRestore();
+    });
+
+    it("stays silent on startup when no stale locks exist", async () => {
+      reclaimStaleBookLocksMock.mockResolvedValueOnce(0);
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      const { createStudioServer } = await import("./server.js");
+      createStudioServer(cloneProjectConfig() as never, root);
+      await flushMicrotasks();
+      // No cleanup line should be emitted when 0 locks were reclaimed.
+      const cleaned = infoSpy.mock.calls.find((call) =>
+        String(call[0]).includes("stale book lock"),
+      );
+      expect(cleaned, "no-op when nothing to clean").toBeUndefined();
+      infoSpy.mockRestore();
+    });
+
+    it("swallows reclaim errors so daemon startup is not blocked", async () => {
+      reclaimStaleBookLocksMock.mockRejectedValueOnce(new Error("disk on fire"));
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { createStudioServer } = await import("./server.js");
+
+      // Should not throw — watchdog is fire-and-forget.
+      expect(() => createStudioServer(cloneProjectConfig() as never, root)).not.toThrow();
+      await flushMicrotasks();
+      const warned = warnSpy.mock.calls.find((call) =>
+        String(call[0]).includes("Failed to sweep"),
+      );
+      expect(warned, "should log a warning when reclaim rejects").toBeDefined();
+      warnSpy.mockRestore();
+    });
   });
 
 });

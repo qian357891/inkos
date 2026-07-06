@@ -2258,6 +2258,23 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
   const state = new StateManager(root);
   let cachedConfig = initialConfig;
 
+  // Stale-lock watchdog: clear `.write.lock` files left over by a previous
+  // daemon that crashed or got SIGKILL'd. Fire-and-forget so server startup
+  // isn't blocked on potentially many books. Surfaces cleanup count + any
+  // errors to stderr via the bootstrap console; the studio logger isn't
+  // constructed yet at this point.
+  void state.reclaimStaleBookLocks()
+    .then((cleaned) => {
+      if (cleaned > 0) {
+        console.info(`[studio] Cleaned ${cleaned} stale book lock(s) on startup.`);
+      }
+    })
+    .catch((error: unknown) => {
+      console.warn(
+        `[studio] Failed to sweep stale book locks on startup: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+
   app.use("/*", cors());
 
   // Structured error handler — ApiError returns typed JSON, others return 500
