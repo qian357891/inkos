@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, writeFile, readFile, mkdir, stat } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, mkdir, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateManager } from "../state/manager.js";
@@ -745,6 +745,122 @@ describe("StateManager", () => {
         expect(lockData).toContain(`pid:${process.pid}`);
 
         await release();
+      } finally {
+        killSpy.mockRestore();
+      }
+    });
+
+    it("rejects second in-process acquire while the first is still held", async () => {
+      await mkdir(manager.bookDir("lock-book-6"), { recursive: true });
+      const release = await manager.acquireBookLock("lock-book-6");
+      await expect(manager.acquireBookLock("lock-book-6")).rejects.toThrow(/in-process/);
+      await release();
+    });
+
+    it("reclaims a lock whose TTL has expired even when its PID is alive", async () => {
+      await mkdir(manager.bookDir("lock-book-7"), { recursive: true });
+      const lockPath = join(manager.bookDir("lock-book-7"), ".write.lock");
+      // Token = fake "stale-but-alive-pid", ts = 30 minutes ago (older than 5 min TTL)
+      const longAgo = Date.now() - 30 * 60 * 1000;
+      await writeFile(
+        lockPath,
+        `pid:${process.pid} ts:${longAgo} token:fake-stale-token\n`,
+        "utf-8",
+      );
+
+      const killSpy = vi.spyOn(process, "kill").mockImplementation((((pid: number) => {
+        if (pid === process.pid) return true; // simulate "still alive"
+        return true;
+      }) as unknown) as typeof process.kill);
+
+      try {
+        const release = await manager.acquireBookLock("lock-book-7");
+        const lockData = await readFile(lockPath, "utf-8");
+        expect(lockData).toMatch(/token:[\w-]+/);
+        expect(lockData).not.toContain("fake-stale-token");
+        await release();
+      } finally {
+        killSpy.mockRestore();
+      }
+    });
+
+    it("reclaims a lock with unparseable legacy content (no token field)", async () => {
+      await mkdir(manager.bookDir("lock-book-8"), { recursive: true });
+      const lockPath = join(manager.bookDir("lock-book-8"), ".write.lock");
+      // Legacy format — only pid + ts, no token. Counts as unparseable.
+      await writeFile(lockPath, "pid:424242 ts:123\n", "utf-8");
+
+      const release = await manager.acquireBookLock("lock-book-8");
+      const lockData = await readFile(lockPath, "utf-8");
+      expect(lockData).toMatch(/token:[\w-]+/);
+      expect(lockData).not.toContain("pid:424242");
+      await release();
+    });
+
+    it("release() does not unlink a lock file whose pid+token no longer matches (token-collision safety)", async () => {
+      await mkdir(manager.bookDir("lock-book-9"), { recursive: true });
+      const lockPath = join(manager.bookDir("lock-book-9"), ".write.lock");
+
+      const release = await manager.acquireBookLock("lock-book-9");
+      // Simulate a third party overwrote our lock with their token (e.g. a
+      // watchdog rewrite). Our release() must NOT delete their file.
+      await writeFile(
+        lockPath,
+        `pid:99999 ts:${Date.now()} token:third-party-write\n`,
+        "utf-8",
+      );
+
+      await release();
+      // Third-party lock file should still exist after our release
+      const stillThere = await readFile(lockPath, "utf-8");
+      expect(stillThere).toContain("third-party-write");
+      // Cleanup: actually delete the simulated third-party lock
+      await unlink(lockPath);
+    });
+
+    it("reclaimStaleBookLocks cleans TTL-expired and PID-dead locks, leaves live ones", async () => {
+      // Book A: TTL-expired lock (live PID but ancient ts)
+      await mkdir(manager.bookDir("lock-rake-a"), { recursive: true });
+      const lockA = join(manager.bookDir("lock-rake-a"), ".write.lock");
+      await writeFile(
+        lockA,
+        `pid:${process.pid} ts:${Date.now() - 30 * 60 * 1000} token:expired\n`,
+        "utf-8",
+      );
+
+      // Book B: PID-dead lock (mocked to ESRCH)
+      await mkdir(manager.bookDir("lock-rake-b"), { recursive: true });
+      const lockB = join(manager.bookDir("lock-rake-b"), ".write.lock");
+      await writeFile(lockB, "pid:77777 ts:1 token:dead\n", "utf-8");
+
+      // Book C: live, fresh lock — should NOT be cleaned
+      await mkdir(manager.bookDir("lock-rake-c"), { recursive: true });
+      const lockC = join(manager.bookDir("lock-rake-c"), ".write.lock");
+      await writeFile(
+        lockC,
+        `pid:${process.pid} ts:${Date.now()} token:live\n`,
+        "utf-8",
+      );
+
+      const killSpy = vi.spyOn(process, "kill").mockImplementation((((pid: number) => {
+        if (pid === 77777) {
+          const error = new Error("no such process") as NodeJS.ErrnoException;
+          error.code = "ESRCH";
+          throw error;
+        }
+        return true;
+      }) as unknown) as typeof process.kill);
+
+      try {
+        const cleaned = await manager.reclaimStaleBookLocks();
+        expect(cleaned).toBe(2);
+
+        // A and B removed
+        await expect(stat(lockA)).rejects.toThrow();
+        await expect(stat(lockB)).rejects.toThrow();
+        // C still there
+        const dataC = await readFile(lockC, "utf-8");
+        expect(dataC).toContain("token:live");
       } finally {
         killSpy.mockRestore();
       }

@@ -1,12 +1,38 @@
 import { readFile, writeFile, mkdir, readdir, rm, stat, unlink, open } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { BookConfig } from "../models/book.js";
 import type { ChapterMeta } from "../models/chapter.js";
 import { bootstrapStructuredStateFromMarkdown, resolveDurableStoryProgress } from "./state-bootstrap.js";
 
+/** A lock file is considered stale after this many ms, regardless of PID alive check. */
+const LOCK_TTL_MS = 5 * 60 * 1000;
+
+interface LockContent {
+  readonly pid: number;
+  readonly ts: number;
+  readonly token: string;
+}
+
+function parseLockContent(raw: string): LockContent | null {
+  const pidMatch = raw.match(/pid:(\d+)/);
+  const tsMatch = raw.match(/ts:(\d+)/);
+  const tokenMatch = raw.match(/token:([\w-]+)/);
+  if (!pidMatch || !tsMatch || !tokenMatch) return null;
+  const pid = Number.parseInt(pidMatch[1] ?? "", 10);
+  const ts = Number.parseInt(tsMatch[1] ?? "", 10);
+  const token = tokenMatch[1] ?? "";
+  if (!Number.isInteger(pid) || pid <= 0 || !Number.isFinite(ts) || !token) return null;
+  return { pid, ts, token };
+}
+
+function formatLockContent(pid: number, ts: number, token: string): string {
+  return `pid:${pid} ts:${ts} token:${token}\n`;
+}
+
 export class StateManager {
-  /** Books actively being written by this process — used for same-process stale lock detection. */
-  private readonly activeWrites = new Set<string>();
+  /** Books actively being written by this process — used for same-process in-process queue. */
+  private readonly activeBookLocks = new Map<string, Promise<unknown>>();
 
   constructor(private readonly projectRoot: string) {}
 
@@ -97,54 +123,195 @@ export class StateManager {
     }
   }
 
+  /**
+   * Acquire an exclusive write lock for a book.
+   *
+   * ## Concurrency model
+   *
+   * Two layers, both must succeed to claim the lock:
+   *
+   * 1. **In-process gate** (`activeBookLocks` map):
+   *    If a same-process claimant is already registered for this book,
+   *    immediately throw — don't queue. This matches the existing
+   *    `allows only one concurrent lock claimant` behavior and prevents
+   *    accidental in-process deadlocks.
+   *
+   * 2. **Cross-process file lock** (`.write.lock`):
+   *    Uses `open(path, "wx")` (exclusive create) as a low-level mutex.
+   *    Each lock file carries a unique `token` (random UUID written by this
+   *    process), `pid`, and `ts` (acquired-at epoch ms).
+   *
+   * ## Stale lock recovery
+   *
+   * On EEXIST, the existing lock is evaluated as stale if any of these hold:
+   *
+   *   a. Lock content is unparseable (legacy / corrupted format).
+   *   b. `Date.now() - existing.ts > LOCK_TTL_MS` (5 minutes — survives
+   *      long-running ops, exits if a daemon process crashed even days ago).
+   *   c. `existing.pid` is no longer alive (`process.kill(pid, 0)` returns
+   *      ESRCH).
+   *   d. `existing.pid === process.pid && existing.token !== token` —
+   *      same process holds a leftover lock with a stale token, but we are
+   *      a fresh acquisition. Safe to clear.
+   *
+   * If none of the above, the lock is owned by another live process:
+   * throw with diagnostics so the user can decide whether to delete manually.
+   *
+   * ## Release
+   *
+   * `release()` first removes the in-process map entry, then verifies the
+   * on-disk lock file still carries our `pid + token` before unlinking.
+   * If a third party (kill -9 daemon recovery, etc.) overwrote the lock
+   * with someone else's token, we don't unlink their file — they own it now.
+   */
   async acquireBookLock(bookId: string): Promise<() => Promise<void>> {
     await mkdir(this.bookDir(bookId), { recursive: true });
     const lockPath = join(this.bookDir(bookId), ".write.lock");
+
+    // ── Step 1: in-process gate (synchronous — no waiting) ──
+    if (this.activeBookLocks.has(bookId)) {
+      throw new Error(
+        `Book "${bookId}" is locked by another in-process claimant ` +
+          `(this process already has the lock).`,
+      );
+    }
+
+    let inProcessRelease!: () => void;
+    const inProcessSlot = new Promise<void>((resolve) => {
+      inProcessRelease = resolve;
+    });
+    this.activeBookLocks.set(bookId, inProcessSlot);
+
+    // ── Step 2: file lock with retry-loop on stale EEXIST ──
+    const token = randomUUID();
+    const pid = process.pid;
+    const ts = Date.now();
+    const ourLockData = formatLockContent(pid, ts, token);
+
     try {
-      const handle = await open(lockPath, "wx");
-      try {
-        await handle.writeFile(`pid:${process.pid} ts:${Date.now()}`, "utf-8");
-      } catch (error) {
-        await handle.close().catch(() => undefined);
-        await unlink(lockPath).catch(() => undefined);
-        throw error;
-      }
-      await handle.close();
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException | undefined)?.code;
-      if (code === "EEXIST") {
-        const lockData = await readFile(lockPath, "utf-8").catch(() => "pid:unknown ts:unknown");
-        const lockPid = this.extractLockPid(lockData);
-        const isStale =
-          (lockPid !== undefined && !this.isProcessAlive(lockPid)) ||
-          (lockPid === process.pid && !this.activeWrites.has(bookId));
-        if (isStale) {
-          await unlink(lockPath).catch(() => undefined);
-          return this.acquireBookLock(bookId);
+      while (true) {
+        try {
+          const handle = await open(lockPath, "wx");
+          try {
+            await handle.writeFile(ourLockData, "utf-8");
+          } catch (error) {
+            await handle.close().catch(() => undefined);
+            await unlink(lockPath).catch(() => undefined);
+            throw error;
+          }
+          await handle.close();
+          break;
+        } catch (e) {
+          const code = (e as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== "EEXIST") throw e;
+
+          // Stale evaluation
+          const raw = await readFile(lockPath, "utf-8").catch(() => "");
+          const existing = parseLockContent(raw);
+
+          // (a) unparseable legacy format — replace
+          if (!existing) {
+            await unlink(lockPath).catch(() => undefined);
+            continue;
+          }
+
+          // (b) TTL exceeded — replace
+          if (Date.now() - existing.ts > LOCK_TTL_MS) {
+            await unlink(lockPath).catch(() => undefined);
+            continue;
+          }
+
+          // (d) same process but token mismatch — own-process stale
+          if (existing.pid === pid && existing.token !== token) {
+            await unlink(lockPath).catch(() => undefined);
+            continue;
+          }
+
+          // (c) PID is dead — replace
+          if (!this.isProcessAlive(existing.pid)) {
+            await unlink(lockPath).catch(() => undefined);
+            continue;
+          }
+
+          // All stale criteria failed: a live process owns this lock
+          const ageSec = Math.round((Date.now() - existing.ts) / 1000);
+          throw new Error(
+            `Book "${bookId}" is locked by another live process ` +
+              `(pid=${existing.pid} age=${ageSec}s token=${existing.token}). ` +
+              `If this is stale, delete ${lockPath}.`,
+          );
         }
-        throw new Error(
-          `Book "${bookId}" is locked by another process (${lockData}). ` +
-            `If this is stale, delete ${lockPath}`,
-        );
       }
+    } catch (e) {
+      // File lock step failed — release the in-process slot so subsequent
+      // attempts aren't blocked behind a phantom queue entry.
+      if (this.activeBookLocks.get(bookId) === inProcessSlot) {
+        this.activeBookLocks.delete(bookId);
+      }
+      inProcessRelease();
       throw e;
     }
-    this.activeWrites.add(bookId);
+
+    // ── Step 3: return release handle ──
     return async () => {
-      this.activeWrites.delete(bookId);
+      if (this.activeBookLocks.get(bookId) === inProcessSlot) {
+        this.activeBookLocks.delete(bookId);
+      }
+      inProcessRelease();
+
+      // Only unlink if the on-disk lock still carries our pid+token.
+      // If a watchdog / external tool overwrote with a different token,
+      // leave their file alone.
       try {
-        await unlink(lockPath);
+        const raw = await readFile(lockPath, "utf-8");
+        const existing = parseLockContent(raw);
+        if (existing && existing.pid === pid && existing.token === token) {
+          await unlink(lockPath);
+        }
       } catch {
-        // ignore
+        // ignore — best effort
       }
     };
   }
 
-  private extractLockPid(lockData: string): number | undefined {
-    const match = lockData.match(/pid:(\d+)/);
-    if (!match) return undefined;
-    const pid = Number.parseInt(match[1] ?? "", 10);
-    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  /**
+   * Stale-lock watchdog: scan every book under `books/` for `.write.lock`
+   * left behind by crashed predecessors, and clean those whose pid is dead
+   * or whose TTL is exceeded. Safe to call at daemon startup; doesn't
+   * touch locks owned by live processes.
+   *
+   * Returns the count of locks cleaned. Best-effort: errors per book are
+   * swallowed so one bad book doesn't block the rest.
+   */
+  async reclaimStaleBookLocks(): Promise<number> {
+    let cleaned = 0;
+    let entries: string[] = [];
+    try {
+      entries = await readdir(this.booksDir);
+    } catch {
+      return 0;
+    }
+    for (const bookId of entries) {
+      const lockPath = join(this.bookDir(bookId), ".write.lock");
+      try {
+        const raw = await readFile(lockPath, "utf-8");
+        const existing = parseLockContent(raw);
+        if (!existing) {
+          await unlink(lockPath).catch(() => undefined);
+          cleaned += 1;
+          continue;
+        }
+        const expired = Date.now() - existing.ts > LOCK_TTL_MS;
+        const dead = !this.isProcessAlive(existing.pid);
+        if (expired || dead) {
+          await unlink(lockPath).catch(() => undefined);
+          cleaned += 1;
+        }
+      } catch {
+        // no lock file for this book, or unlink failure; skip silently
+      }
+    }
+    return cleaned;
   }
 
   private isProcessAlive(pid: number): boolean {
