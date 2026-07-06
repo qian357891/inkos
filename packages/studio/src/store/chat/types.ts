@@ -196,6 +196,19 @@ export interface MessageActions {
   loadSessionDetail: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, text: string, options?: SendMessageOptions) => Promise<void>;
   abortSession: (sessionId: string) => Promise<void>;
+  /**
+   * Restore the session to "just after" the given message index (drops that message and everything after).
+   * Truncates both backend transcript and frontend store.messages, aborts in-flight SSE.
+   * Returns the original user message content if `messageIndex` points to a user message;
+   * otherwise returns null — callers can then call `sendMessage` themselves with `null` skipped.
+   */
+  rewindToMessage: (sessionId: string, messageIndex: number) => Promise<string | null>;
+  /**
+   * Restore to a user message then re-send its content. Convenience wrapper for the UI
+   * "Retry from here" button — same effect as rewindToMessage + sendMessage, atomic from
+   * the user's perspective.
+   */
+  retryFromMessage: (sessionId: string, messageIndex: number) => Promise<void>;
   setSelectedModel: (model: string, service: string) => void;
 }
 

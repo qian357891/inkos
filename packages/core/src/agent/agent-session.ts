@@ -48,6 +48,11 @@ import {
   readTranscriptEvents,
 } from "../interaction/session-transcript.js";
 import {
+  truncateTranscriptToMessage,
+  truncateTranscriptToCommittedMessageIndex,
+  type TruncateResult,
+} from "../interaction/session-transcript-truncate.js";
+import {
   TOOL_RESULT_BRIDGE_TEXT,
   adaptRestoredAgentMessagesForModel,
   appendRestoredHistoryBoundary,
@@ -1231,4 +1236,54 @@ export function abortAgentSession(projectRoot: string, sessionId: string): boole
     aborted = true;
   }
   return aborted;
+}
+
+/**
+ * Restore a session to "just after" the given committed message index.
+ *
+ * 语义：
+ * 1. 把 transcript JSONL 中 target message 之后的所有 events 全部 truncate 掉
+ *    （含同一 request 之后的 assistant / tool call / tool result，以及后续 user 输入）
+ * 2. 主动 abort in-flight request 并 evict agent cache
+ *    —— 下次 sendMessage 走 cache miss 创建 fresh Agent 实例，从截断后的对话上下文重新响应
+ *
+ * 调用场景：
+ * - 用户在 user message 上按"Restore to here" / "Retry from here" → rewindsSessionToMessageIndex
+ * - Studio / TUI 在 array index 上识别 message（前端 store 不持久化 uuid，按 index 算最稳）
+ *
+ * messageIndex 是 committed message array 的索引（不含 system / placeholder），
+ * 与前端 ChatPage 中 `session.messages[index]` 对齐。Store 同步从同一个 committed
+ * 列表派生，所以前后端一致。
+ *
+ * 返回值：
+ * - {truncated, cacheEvicted, aborted, targetIndex}：truncated 为 undefined 表示
+ *   index 越界；这种情况下 truncate 是 no-op，但仍然 abort 任何 in-flight，
+ *   保证 UI 状态干净。
+ */
+export interface RewindResult {
+  readonly truncated?: TruncateResult;
+  readonly cacheEvicted: boolean;
+  readonly aborted: boolean;
+  readonly targetIndex: number;
+}
+
+export async function rewindSessionToMessageIndex(
+  projectRoot: string,
+  sessionId: string,
+  messageIndex: number,
+): Promise<RewindResult> {
+  // 1. truncate JSONL（async IO 调用）
+  const truncated = await truncateTranscriptToCommittedMessageIndex(
+    projectRoot,
+    sessionId,
+    messageIndex,
+  );
+  // 2. abort 任何 in-flight + 删 cache（已有 helpers；projectRoot 用于过滤跨 project）
+  const aborted = abortAgentSession(projectRoot, sessionId);
+  return {
+    ...(truncated !== undefined ? { truncated } : {}),
+    cacheEvicted: aborted,
+    aborted,
+    targetIndex: messageIndex,
+  };
 }

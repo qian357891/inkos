@@ -42,6 +42,7 @@ import {
   Message,
   MessageContent,
 } from "../components/ai-elements/message";
+import { Button } from "../components/ui/button";
 import {
   type ChatPageModelPreference,
   filterModelGroups,
@@ -420,6 +421,8 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const setInput = useChatStore((s) => s.setInput);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const abortSession = useChatStore((s) => s.abortSession);
+  const rewindToMessage = useChatStore((s) => s.rewindToMessage);
+  const retryFromMessage = useChatStore((s) => s.retryFromMessage);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
   const loadSessionList = useChatStore((s) => s.loadSessionList);
   const createSession = useChatStore((s) => s.createSession);
@@ -924,10 +927,41 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
         ) : (
           <div className="max-w-3xl mx-auto space-y-4">
             {messages.map((msg, i) => (
-              <div key={`${msg.timestamp}-${i}`}>
+              <div key={`${msg.timestamp}-${i}`} className="group relative">
                 {msg.role === "user" ? (
-                  /* User message */
-                  <ChatMessage role="user" content={msg.content} timestamp={msg.timestamp} theme={theme} />
+                  /* User message — show Restore / Retry buttons on hover.
+                     Restore = drop this turn + everything after. Retry = Restore + auto-resend. */
+                  <div className="relative">
+                    <ChatMessage role="user" content={msg.content} timestamp={msg.timestamp} theme={theme} />
+                    {activeSessionId && !loading && (
+                      <div className="absolute right-2 top-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          aria-label={isZh ? "恢复到此消息" : "Restore to here"}
+                          title={isZh ? "恢复到此消息" : "Restore to here"}
+                          onClick={() => {
+                            void rewindToMessage(activeSessionId, i);
+                          }}
+                        >
+                          ↺ Restore
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          aria-label={isZh ? "重新尝试这条消息" : "Retry from here"}
+                          title={isZh ? "重新尝试这条消息" : "Retry from here"}
+                          onClick={() => {
+                            void retryFromMessage(activeSessionId, i);
+                          }}
+                        >
+                          ↻ Retry
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ) : msg.parts && msg.parts.length > 0 ? (
                   /* Assistant message — parts-based rendering (chronological) */
                   /* Merge consecutive utility tool parts into one group */

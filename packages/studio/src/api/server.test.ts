@@ -31,6 +31,7 @@ const loadProjectSessionMock = vi.fn();
 const resolveSessionActiveBookMock = vi.fn();
 const runAgentSessionMock = vi.fn();
 const abortAgentSessionMock = vi.fn();
+const rewindSessionToMessageIndexMock = vi.fn();
 const playRunnerStepMock = vi.fn();
 const playRunnerCtorArgs: unknown[] = [];
 const generatePlayImageMock = vi.fn();
@@ -251,6 +252,7 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
     resolveSessionActiveBook: resolveSessionActiveBookMock,
     runAgentSession: runAgentSessionMock,
     abortAgentSession: abortAgentSessionMock,
+    rewindSessionToMessageIndex: rewindSessionToMessageIndexMock,
     createSubAgentTool: actual.createSubAgentTool,
     createShortFictionRunTool: actual.createShortFictionRunTool,
     createGenerateCoverTool: actual.createGenerateCoverTool,
@@ -514,6 +516,7 @@ describe("createStudioServer daemon lifecycle", () => {
     pipelineConfigs.length = 0;
     runAgentSessionMock.mockReset();
     abortAgentSessionMock.mockReset();
+    rewindSessionToMessageIndexMock.mockReset();
     playRunnerStepMock.mockReset();
     playRunnerCtorArgs.length = 0;
     playRunnerStepMock.mockResolvedValue({
@@ -2659,6 +2662,41 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(response.status).toBe(200);
     expect(abortAgentSessionMock).toHaveBeenCalledWith(root, "agent-session-1");
     await expect(response.json()).resolves.toEqual({ ok: true, aborted: true });
+  });
+
+  it("rewinds a session to a given message index via POST /api/v1/sessions/:sessionId/messages/:messageIndex/rewind", async () => {
+    const expectedResult = {
+      targetIndex: 2,
+      truncated: { targetSeq: 5, keptCount: 5, removedCount: 3 },
+      cacheEvicted: true,
+      aborted: false,
+    };
+    rewindSessionToMessageIndexMock.mockResolvedValueOnce(expectedResult);
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request(
+      "http://localhost/api/v1/sessions/agent-session-1/messages/2/rewind",
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(rewindSessionToMessageIndexMock).toHaveBeenCalledWith(root, "agent-session-1", 2);
+    await expect(response.json()).resolves.toEqual({ ok: true, ...expectedResult });
+  });
+
+  it("rewind returns 400 when messageIndex is not a non-negative integer", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    for (const bad of ["abc", "-1", "1.5"]) {
+      const response = await app.request(
+        `http://localhost/api/v1/sessions/agent-session-1/messages/${bad}/rewind`,
+        { method: "POST" },
+      );
+      expect(response.status, `bad input: ${bad}`).toBe(400);
+      expect(rewindSessionToMessageIndexMock).not.toHaveBeenCalled();
+    }
   });
 
   it("routes /api/agent through runAgentSession and returns response + sessionId", async () => {

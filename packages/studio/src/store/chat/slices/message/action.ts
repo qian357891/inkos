@@ -325,6 +325,76 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     }
   },
 
+  /**
+   * Restore a session to "just after" the given message index.
+   *
+   * `messageIndex` follows the same ordering backend uses (`committedMessageEvents`
+   * 按 seq 排序后的数组索引)，与 store.messages 数组中的位置对应。
+   *
+   * 行为：
+   * 1. 关闭 in-flight SSE 流
+   * 2. POST /sessions/:sessionId/messages/:messageIndex/rewind（后端 truncate + evict）
+   * 3. 同步 store：移除该 index 之后的所有 messages（含 assistant / tool executions），
+   *    并标记 isStreaming=false，draftRounds 清空避免残留。
+   *
+   * 注意：restore 是同步本地 + 后端的 destructive 行为，所以不提供"soft" 模式。
+   * 如果想保留 history 而不实际删除，传 `keepInSession: true`（保留兼容外部
+   * Agent.run，但当前 UI 不暴露该选项）。
+   */
+  rewindToMessage: async (sessionId, messageIndex) => {
+    const session = get().sessions[sessionId];
+    if (!session) return null;
+
+    const total = session.messages.length;
+    if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= total) {
+      get().addErrorMessage(sessionId, `rewindToMessage: invalid index ${messageIndex}`);
+      return null;
+    }
+
+    const targetMessage = session.messages[messageIndex];
+    const retryContent = targetMessage.role === "user" ? targetMessage.content : null;
+
+    session.stream?.close();
+    set((state) => ({
+      sessions: updateSession(state.sessions, sessionId, (current) => ({
+        isStreaming: false,
+        stream: null,
+        lastError: null,
+        messages: current.messages.slice(0, messageIndex),
+        draftRounds: [],
+      })),
+    }));
+
+    try {
+      await fetchJson(
+        `/sessions/${sessionId}/messages/${messageIndex}/rewind`,
+        { method: "POST" },
+      );
+    } catch (error) {
+      get().addErrorMessage(sessionId, error instanceof Error ? error.message : String(error));
+    }
+
+    return retryContent;
+  },
+
+  /**
+   * Restore to a user message then immediately re-send its content.
+   *
+   * 配合 `rewindToMessage` 使用，UI 流程：
+   * 1. 用户点 user message 上的"Retry"按钮
+   * 2. 后端 truncate + evict
+   * 3. store 截断 messages
+   * 4. sendMessage 把同一条 user content 重新发出去（模型不同 = 不同响应）
+   */
+  retryFromMessage: async (sessionId, messageIndex) => {
+    const retryContent = await get().rewindToMessage(sessionId, messageIndex);
+    if (retryContent !== null) {
+      await get().sendMessage(sessionId, retryContent, {});
+    } else {
+      // 不在 user message 上重试时，跳过 re-send。让 UI 的 Restore 流程单独处理。
+    }
+  },
+
   loadSessionDetail: async (sessionId) => {
     // 草稿会话：磁盘上还没有文件，直接跳过远端拉取。
     // 本地已有消息：不拉取远端，避免流式中或未持久化的消息被覆盖。

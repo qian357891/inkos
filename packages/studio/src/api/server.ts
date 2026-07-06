@@ -23,6 +23,7 @@ import {
   migrateBookSession,
   SessionAlreadyMigratedError,
   abortAgentSession,
+  rewindSessionToMessageIndex,
   runAgentSession,
   resolveServicePreset,
   resolveServiceProviderFamily,
@@ -3903,6 +3904,28 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const aborted = abortAgentSession(root, sessionId);
     broadcast("agent:aborted", { sessionId, aborted });
     return c.json({ ok: true, aborted });
+  });
+
+  // Restore to a specific message in the session — drops that message and everything after it.
+  // The agent cache for that session is evicted, so the next user turn rebuilds
+  // the Agent from the truncated transcript. `:messageIndex` is the committed
+  // message array index (matches the frontend `session.messages[index]`).
+  app.post("/api/v1/sessions/:sessionId/messages/:messageIndex/rewind", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    // 用 Number() 而不是 Number.parseInt() — parseInt 会把 "1.5" 截断成 1，
+    // 我们要求严格的整数参数。Number("1.5") = NaN，Number.isInteger 立刻拒绝。
+    const rawIndex = c.req.param("messageIndex");
+    const messageIndex = Number(rawIndex);
+    if (!Number.isInteger(messageIndex) || messageIndex < 0 || String(messageIndex) !== rawIndex) {
+      return c.json({ ok: false, error: "messageIndex must be a non-negative integer" }, 400);
+    }
+    try {
+      const result = await rewindSessionToMessageIndex(root, sessionId, messageIndex);
+      return c.json({ ok: true, ...result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ ok: false, error: message }, 500);
+    }
   });
 
   app.post("/api/v1/agent", async (c) => {

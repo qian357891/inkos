@@ -23,11 +23,13 @@ export {
 } from "./agent-tools.js";
 export {
   abortAgentSession,
+  rewindSessionToMessageIndex,
   runAgentSession,
   evictAgentCache,
   type AgentSessionAttachment,
   type AgentSessionConfig,
   type AgentSessionResult,
+  type RewindResult,
 } from "./agent-session.js";
 export { createBookContextTransform } from "./context-transform.js";
 export {
