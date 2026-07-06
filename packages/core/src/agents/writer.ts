@@ -7,6 +7,7 @@ import { buildSettlerSystemPrompt, buildSettlerUserPrompt } from "./settler-prom
 import { buildObserverSystemPrompt, buildObserverUserPrompt } from "./observer-prompts.js";
 import { parseSettlerDeltaOutput } from "./settler-delta-parser.js";
 import { parseSettlementOutput } from "./settler-parser.js";
+import { stripReasoning } from "../utils/strip-reasoning.js";
 import { readGenreProfile, readBookRules } from "./rules-reader.js";
 import {
   detectCrossChapterRepetition,
@@ -291,7 +292,11 @@ export class WriterAgent extends BaseAgent {
     );
     const creativeUsage = creativeResponse.usage;
 
-    const creative = parseCreativeOutput(chapterNumber, creativeResponse.content, resolvedLengthSpec.countingMode);
+    const creative = parseCreativeOutput(
+      chapterNumber,
+      stripReasoning(creativeResponse.content),
+      resolvedLengthSpec.countingMode,
+    );
 
     // Phase 4: soft-check that PRE_WRITE_CHECK aligns with the chapter memo.
     // Memo was already parse-validated in the planner, so this only warns —

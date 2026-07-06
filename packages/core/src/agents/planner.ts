@@ -17,6 +17,7 @@ import {
   loadPlanningSeedMaterials,
 } from "../utils/planning-materials.js";
 import { parseMemo, PlannerParseError } from "../utils/chapter-memo-parser.js";
+import { stripReasoning } from "../utils/strip-reasoning.js";
 import {
   buildPlannerUserMessage,
   getPlannerMemoSystemPrompt,
@@ -250,7 +251,11 @@ export class PlannerAgent extends BaseAgent {
       );
 
       try {
-        return parseMemo(response.content, input.chapterNumber, input.isGoldenOpening);
+        return parseMemo(
+          stripReasoning(response.content),
+          input.chapterNumber,
+          input.isGoldenOpening,
+        );
       } catch (error) {
         if (!(error instanceof PlannerParseError)) {
           throw error;

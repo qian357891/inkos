@@ -5,6 +5,7 @@ import { readGenreProfile } from "./rules-reader.js";
 import { writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { renderHookSnapshot } from "../utils/memory-retrieval.js";
+import { stripReasoning } from "../utils/strip-reasoning.js";
 import {
   shouldPromoteHook,
   type PromotionContext,
@@ -672,7 +673,11 @@ You MUST emit all **5 SECTION blocks in order**: story_frame → volume_map → 
   }
 
   private parseSections(content: string, language: "zh" | "en"): ArchitectOutput {
-    const parsedSections = this.parseArchitectSectionMap(content);
+    // reasoning 模型（MiniMax-M2.7/M3、DeepSeek-R1 等）会把内部思考以
+    // ASCII XML 标签（###、<thinking>、<reasoning>）混进 content 字段。
+    // 解析前先剥，否则 5 段 SECTION 切片的偏移量会被 thinking 块污染，
+    // 出现“第一个 section 误并入 thinking 尾巴”这种错位。
+    const parsedSections = this.parseArchitectSectionMap(stripReasoning(content));
 
     // Phase 5 new sections take precedence.
     const storyFrame = parsedSections.get("story_frame") ?? "";
