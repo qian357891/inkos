@@ -12,8 +12,11 @@ import { saveSecrets } from "../llm/secrets.js";
 import {
   extractGeminiImageBase64,
   extractImagesGenerationImage,
+  extractMinimaxImageUrls,
+  generateImageFromPrompt,
   generateShortFictionCover,
   resolveCoverGenerationRequest,
+  resolveMinimaxAspectRatio,
 } from "../pipeline/short-fiction-runner.js";
 
 const ZERO_USAGE = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -196,6 +199,146 @@ describe("public short-fiction chain", () => {
     });
 
     expect(image).toEqual({ base64: "ZmFrZQ==", extension: "jpg" });
+  });
+
+  it("extracts MiniMax image_urls from the image_generation response", () => {
+    expect(extractMinimaxImageUrls({
+      data: { image_urls: ["https://cdn.example.test/cover-a.jpeg", "https://cdn.example.test/cover-b.jpeg"] },
+    })).toEqual([
+      "https://cdn.example.test/cover-a.jpeg",
+      "https://cdn.example.test/cover-b.jpeg",
+    ]);
+
+    expect(extractMinimaxImageUrls({
+      data: { images: [{ url: "https://cdn.example.test/cover-c.jpeg" }] },
+    })).toEqual(["https://cdn.example.test/cover-c.jpeg"]);
+
+    expect(extractMinimaxImageUrls({
+      data: { images: [{ image_url: "https://cdn.example.test/cover-d.jpeg" }] },
+    })).toEqual(["https://cdn.example.test/cover-d.jpeg"]);
+
+    // Falls back to base64 data URIs when the response asks for `response_format: base64`.
+    expect(extractMinimaxImageUrls({
+      data: { images: [{ b64_base64: "ZmFrZQ==" }] },
+    })).toEqual(["data:image/png;base64,ZmFrZQ=="]);
+
+    expect(extractMinimaxImageUrls({ data: {} })).toEqual([]);
+    expect(extractMinimaxImageUrls({})).toEqual([]);
+  });
+
+  it("snaps inkos cover sizes to MiniMax's fixed aspect ratios", () => {
+    // 3:4 is the default short-fiction cover aspect.
+    expect(resolveMinimaxAspectRatio("1024x1360")).toBe("3:4");
+    expect(resolveMinimaxAspectRatio("768x1024")).toBe("3:4");
+    // 9:16 is the closest match for very tall portraits.
+    expect(resolveMinimaxAspectRatio("720x1280")).toBe("9:16");
+    // Landscape (16:9) and square-ish (1:1 → 3:2 is closest of the supported set).
+    expect(resolveMinimaxAspectRatio("1920x1080")).toBe("16:9");
+    // Square input: 1:1 isn't supported by MiniMax, so it must snap to one of the supported
+    // ratios (3:2 / 4:3 are the closest on the wider side).
+    expect(["3:2", "4:3"]).toContain(resolveMinimaxAspectRatio("1024x1024"));
+    // Garbage sizes fall back to 3:4, not error.
+    expect(resolveMinimaxAspectRatio("garbage")).toBe("3:4");
+    expect(resolveMinimaxAspectRatio("")).toBe("3:4");
+  });
+
+  it("resolves cover generation from the MiniMax project cover config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inkos-short-cover-minimax-"));
+    try {
+      await writeFile(join(root, "inkos.json"), JSON.stringify({
+        name: "cover-minimax-test",
+        version: "0.1.0",
+        language: "zh",
+        llm: {
+          provider: "openai",
+          service: "kkaiapi",
+          configSource: "studio",
+          baseUrl: "https://api.kkaiapi.com/v1",
+          apiKey: "",
+          model: "deepseek-v4-flash",
+          cover: {
+            service: "minimax",
+            model: "image-01",
+          },
+        },
+        notify: [],
+      }, null, 2), "utf-8");
+      await saveSecrets(root, {
+        services: {
+          "cover:minimax": { apiKey: "sk-minimax" },
+        },
+      });
+
+      await expect(resolveCoverGenerationRequest({ root })).resolves.toMatchObject({
+        api: "minimax-image",
+        baseUrl: "https://api.minimaxi.com/v1",
+        model: "image-01",
+        apiKey: "sk-minimax",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("calls the MiniMax image_generation endpoint and downloads the first URL", async () => {
+    const originalFetch = globalThis.fetch;
+    let imageRequestBody: unknown;
+    let imageRequestUrl: string | undefined;
+    let downloadUrl: string | undefined;
+    try {
+      const fetchMock = vi.fn(async (input: unknown, init?: { readonly body?: unknown }) => {
+        const url = typeof input === "string" ? input : "";
+        if (url.endsWith("/image_generation")) {
+          imageRequestUrl = url;
+          imageRequestBody = init?.body;
+          return new Response(JSON.stringify({
+            data: {
+              image_urls: ["https://cdn.example.test/cover-minimax.jpeg"],
+            },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        // Second hit = downloading the generated image.
+        downloadUrl = url;
+        return new Response(Buffer.from("minimax-fake"), {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      });
+      globalThis.fetch = fetchMock as never;
+
+      const { buffer, extension } = await generateImageFromPrompt({
+        api: "minimax-image",
+        baseUrl: "https://api.minimaxi.com/v1",
+        model: "image-01",
+        apiKey: "sk-minimax-test",
+      }, "生成冷色调封面，标题留白", "1024x1360");
+
+      expect(extension).toBe("jpg");
+      expect(buffer.toString("utf-8")).toBe("minimax-fake");
+      expect(imageRequestUrl).toBe("https://api.minimaxi.com/v1/image_generation");
+      expect(downloadUrl).toBe("https://cdn.example.test/cover-minimax.jpeg");
+      const body = JSON.parse(String(imageRequestBody));
+      expect(body).toMatchObject({
+        model: "image-01",
+        prompt: "生成冷色调封面，标题留白",
+        aspect_ratio: "3:4",
+        response_format: "url",
+        n: 1,
+        prompt_optimizer: true,
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.minimaxi.com/v1/image_generation",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            Authorization: "Bearer sk-minimax-test",
+          }),
+        }),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("generates a standalone cover artifact without running the short fiction pipeline", async () => {

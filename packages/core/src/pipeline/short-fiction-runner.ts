@@ -24,6 +24,7 @@ import {
   type ShortFictionSalesPackage,
 } from "../agents/short-fiction.js";
 import { coverSecretKey, resolveCoverProviderPreset, type CoverProviderPreset } from "../llm/cover-providers.js";
+import { COVER_PROVIDER_PRESETS } from "../llm/cover-providers.js";
 import { loadSecrets } from "../llm/secrets.js";
 import { safeChildPath } from "../utils/path-safety.js";
 import { toPosixPath as projectPath } from "../utils/posix-path.js";
@@ -519,6 +520,9 @@ export async function generateImageFromPrompt(
     const payload = await generateGeminiCover(request, prompt);
     return { buffer: Buffer.from(payload.base64, "base64"), extension: payload.extension };
   }
+  if (request.api === "minimax-image") {
+    return generateMinimaxCover(request, prompt, size);
+  }
   if (request.api === "images") {
     return generateImagesCover(request, prompt, size);
   }
@@ -574,9 +578,14 @@ export async function resolveCoverGenerationRequest(input: {
     const endpoint = resolveCoverEndpoint(input.coverEndpoint, input.coverBaseUrl);
     const baseUrl = input.coverBaseUrl || process.env.INKOS_COVER_BASE_URL || endpoint
       .replace(/\/responses\/?$/u, "")
-      .replace(/\/images\/generations\/?$/u, "");
+      .replace(/\/images\/generations\/?$/u, "")
+      .replace(/\/image_generation\/?$/u, "");
     return {
-      api: endpoint.includes("/responses") ? "responses" : "images",
+      api: endpoint.includes("/responses")
+        ? "responses"
+        : endpoint.includes("/image_generation")
+          ? "minimax-image"
+          : "images",
       baseUrl,
       endpoint,
       model: input.coverModel || process.env.INKOS_COVER_MODEL || "gpt-image-2",
@@ -794,6 +803,116 @@ export function extractGeminiImageBase64(payload: unknown): { readonly base64: s
   }
 
   return undefined;
+}
+
+/**
+ * MiniMax's `image_generation` endpoint returns URLs by default. When the
+ * caller asked for `response_format: "base64"` the array carries
+ * `{"b64_base64": "..."}` entries instead. We accept either.
+ */
+export function extractMinimaxImageUrls(payload: unknown): ReadonlyArray<string> {
+  const data = (payload as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return [];
+
+  const imageUrls = (data as { image_urls?: unknown }).image_urls;
+  if (Array.isArray(imageUrls)) {
+    return imageUrls.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  }
+
+  const array = (data as { images?: unknown }).images;
+  if (Array.isArray(array)) {
+    return array
+      .map((entry) => {
+        if (typeof entry === "string") return entry;
+        const record = entry as { url?: unknown; image_url?: unknown; b64_base64?: unknown };
+        if (typeof record.url === "string" && record.url.trim()) return record.url.trim();
+        if (typeof record.image_url === "string" && record.image_url.trim()) return record.image_url.trim();
+        if (typeof record.b64_base64 === "string" && record.b64_base64.trim()) {
+          return `data:image/png;base64,${record.b64_base64.trim()}`;
+        }
+        return "";
+      })
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+/**
+ * Map an inkos cover `size` like "1024x1360" to MiniMax's fixed aspect_ratio
+ * vocabulary (16:9 / 4:3 / 3:2 / 2:3 / 3:4 / 9:16 / 21:9). When the size
+ * isn't a MiniMax-supported ratio, we snap to the closest match instead of
+ * erroring out — covers are visual approximation, not pixel-exact.
+ */
+export function resolveMinimaxAspectRatio(size: string): string {
+  const fallback = "3:4";
+  const supported = COVER_PROVIDER_PRESETS.find((preset) => preset.service === "minimax")?.supportedAspectRatios
+    ?? [fallback];
+  const match = /^(\d+)\s*[xX×]\s*(\d+)$/u.exec(size.trim());
+  if (!match) return fallback;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return fallback;
+  }
+  const target = width / height;
+  let best = fallback;
+  let bestDiff = Number.POSITIVE_INFINITY;
+  for (const ratio of supported) {
+    const parts = ratio.split(":");
+    const w = Number(parts[0]);
+    const h = Number(parts[1]);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || h <= 0) continue;
+    const candidate = w / h;
+    const diff = Math.abs(Math.log(candidate) - Math.log(target));
+    if (diff < bestDiff) {
+      best = ratio;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+async function generateMinimaxCover(
+  request: ShortFictionCoverRequest,
+  prompt: string,
+  size: string,
+): Promise<{ readonly buffer: Buffer; readonly extension: "png" | "jpg" }> {
+  const endpoint = request.endpoint ?? `${request.baseUrl.replace(/\/+$/u, "")}/image_generation`;
+  const aspectRatio = resolveMinimaxAspectRatio(size);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${request.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: request.model,
+      prompt,
+      aspect_ratio: aspectRatio,
+      response_format: "url",
+      n: 1,
+      prompt_optimizer: true,
+    }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`cover generation failed: HTTP ${response.status} ${text.slice(0, 500)}`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`cover generation returned non-JSON response: ${String(error)}`);
+  }
+
+  const urls = extractMinimaxImageUrls(payload);
+  const first = urls[0];
+  if (!first) {
+    throw new Error("cover generation response did not include MiniMax image_urls.");
+  }
+  return downloadGeneratedCoverImage(first, request.apiKey);
 }
 
 export function resolveCoverApiKey(apiKeyEnv: string): string {

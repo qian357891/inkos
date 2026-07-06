@@ -2178,6 +2178,50 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("exposes MiniMax as a cover provider and persists its key under cover:minimax", async () => {
+    loadSecretsMock.mockResolvedValue({ services: { "cover:minimax": { apiKey: "sk-minimax" } } });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const list = await app.request("http://localhost/api/v1/cover/config");
+    expect(list.status).toBe(200);
+    const payload = await list.json() as {
+      readonly providers: ReadonlyArray<{ readonly service: string; readonly label: string; readonly models: readonly string[]; readonly connected: boolean }>;
+    };
+    const minimax = payload.providers.find((provider) => provider.service === "minimax");
+    expect(minimax).toMatchObject({
+      service: "minimax",
+      label: "MiniMax Images",
+      baseUrl: "https://api.minimaxi.com/v1",
+      defaultModel: "image-01",
+      models: ["image-01"],
+      connected: true,
+    });
+
+    const saveConfig = await app.request("http://localhost/api/v1/cover/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: "minimax", model: "image-01" }),
+    });
+    expect(saveConfig.status).toBe(200);
+
+    const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
+    expect(raw.llm.cover).toEqual({ service: "minimax", model: "image-01" });
+
+    // Round-trips the secret save under the cover:minimax key, distinct from the LLM key.
+    saveSecretsMock.mockClear();
+    const saveSecret = await app.request("http://localhost/api/v1/cover/secret/minimax", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "sk-minimax" }),
+    });
+    expect(saveSecret.status).toBe(200);
+    expect(saveSecretsMock).toHaveBeenCalledWith(root, {
+      services: { "cover:minimax": { apiKey: "sk-minimax" } },
+    });
+  });
+
   it("serves generated project cover images without exposing arbitrary files", async () => {
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(cloneProjectConfig() as never, root);
