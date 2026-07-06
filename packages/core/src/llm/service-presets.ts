@@ -26,10 +26,13 @@ export const SERVICE_PRESETS: Record<string, ServicePreset> = {
     api: "openai-completions",
     baseUrl: "https://api.minimaxi.com/v1",
     label: "MiniMax",
-    temperatureRange: [0, 2],
-    defaultTemperature: 0.9,
-    writingTemperature: 0.9,
-    knownModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"],
+    // 与 endpoints/minimax.ts 的 temperatureRange 保持一致，避免 SERVICE_PRESETS
+    // 与 endpoint 之间出现约束分歧；本地 clampTemperature() 优先读 endpoint，
+    // 但 preset 这一行仍是 UI/验证路径下会用到的默认范围。
+temperatureRange: [0, 1],
+      defaultTemperature: 0.9,
+      writingTemperature: 0.9,
+      knownModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"],
   },
   bailian:     {
     providerFamily: "anthropic",

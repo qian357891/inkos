@@ -12,6 +12,13 @@
 - 通知渠道支持 `format: text`（默认仍为 markdown）；`write next / write rewrite / auto / revise / audit` 新增 `--notify`，动作完成或失败后发送通知（#308）
 - Studio 新增"操作详情默认展开"浏览器偏好（项目设置 → 对话界面）；read/grep 等小工具行有结果时也可展开查看正文（#306）
 
+### Reliability And Fixes
+- **MiniMax stream 默认改为 true**：v1.6.2 之前 `transportDefaults: { stream: false }`，长章节（~1.4 万字）在 sync 模式下网络抖动直接触发 `PartialResponseError`，整章从头重写。改回 `true` 后走 SSE 增量，单次 timeout 风险显著下降，Studio UI 也能看到渐进写章节过程。用户可在 `inkos.json` / `INKOS_LLM_STREAM=false` 手动覆盖回 sync。
+- **MiniMax 补 `compat.requiresAssistantAfterToolResult: true`**：M2/M2.7 走 OpenAI-compatible chat completions，遇到 tool_call 历史结尾会拒绝。和 deepseek 一样需要显式桥接，避免 sub_agent（`propose_action` / `play_start` 等）后续对话 400。
+- **MiniMax preset 温度范围与 endpoint 对齐到 `[0, 1]`**：原来 preset 写 `[0, 2]`、endpoint 写 `[0, 1]`，preset 里那行是 UI / 验证路径下会用到的默认范围；`clampTemperature()` 优先读 endpoint，但保持一致能避免 fallback / 嗅探路径上的分歧。
+- **`createLLMClient` 给 `minimax` 显式映射 `piProvider: "openai"`**：原本依赖 baseUrl 嗅探 pi-ai provider，新增显式 case 与 google / zhipu / openrouter / ollama 同一档，无需依赖嗅探。
+- **测试覆盖**：新增 MiniMax 适配回归组（`providers-schema`、`service-presets-regression`、`provider.test`），锁定 stream=true / compat / temperatureRange / piProvider 五项不变量。
+
 ## v1.6.3
 
 ### Hotfix

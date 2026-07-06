@@ -31,6 +31,15 @@ describe("service-presets regression", () => {
       expect(preset!.api).toBe("openai-completions");
     });
 
+    it("temperatureRange 与 endpoint.ts 一致（[0, 1]），防止预设 / endpoint 走两条路", () => {
+      // endpoints/minimax.ts 的 temperatureRange 也是 [0, 1]，resolveServicePreset 优先
+      // 从 endpoint 取，但 preset 这一行的 [0, 1] 仍然必须维护，因为是 UI / 验证路径
+      // 下会用到的默认范围；如果两处分歧，clampTemperature() 会以 endpoint 为准，
+      // 但 legacy fallback 等场景会读 preset。
+      const preset = resolveServicePreset("minimax");
+      expect(preset!.temperatureRange).toEqual([0, 1]);
+    });
+
     it("has knownModels with current MiniMax chat models", () => {
       const preset = resolveServicePreset("minimax");
       expect(preset!.knownModels).toBeDefined();

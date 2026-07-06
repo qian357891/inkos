@@ -902,6 +902,25 @@ describe("createLLMClient with providers lookup", () => {
     expect(client.defaults.maxTokens).toBe(4096);
   });
 
+  it("minimax service 显式映射 piProvider='openai'（避免依赖 baseUrl 嗅探）", async () => {
+    const { createLLMClient } = await import("../llm/provider.js");
+    const { LLMConfigSchema } = await import("../models/project.js");
+    const client = createLLMClient(LLMConfigSchema.parse({
+      provider: "openai",
+      service: "minimax",
+      model: "MiniMax-M2.7",
+      apiKey: "test",
+      baseUrl: "https://api.minimaxi.com/v1",
+    }));
+    expect(client._piModel?.provider).toBe("openai");
+    expect(client._piModel?.baseUrl).toBe("https://api.minimaxi.com/v1");
+    // modelCard 里 M2.7 maxOutput=131072, contextWindow=204800
+    expect(client._piModel?.maxTokens).toBe(131072);
+    expect(client._piModel?.contextWindow).toBe(204_800);
+    // compat 必须透传到 pi-ai，否则 tool_call 历史会被 MiniMax 拒绝
+    expect((client._piModel as any)?.compat?.requiresAssistantAfterToolResult).toBe(true);
+  });
+
   it("未知 model 走 8192 * 3 的写作兜底预算", async () => {
     const { createLLMClient } = await import("../llm/provider.js");
     const { LLMConfigSchema } = await import("../models/project.js");

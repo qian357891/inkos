@@ -179,6 +179,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   else if (inkosProvider?.id === "openrouter") piProvider = "openrouter";
   else if (inkosProvider?.id === "githubCopilot") piProvider = "githubCopilot";
   else if (inkosProvider?.id === "ollama") piProvider = "ollama";
+  else if (inkosProvider?.id === "minimax") piProvider = "openai";
   else if (inkosProvider?.api === "anthropic-messages") piProvider = "anthropic";
   else piProvider = provider;
 

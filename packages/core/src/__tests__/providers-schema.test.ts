@@ -155,4 +155,34 @@ describe("providers structural integrity", () => {
       expect((ep as any).piProvider, `endpoint=${ep.id}`).toBeUndefined();
     }
   });
+
+  describe("MiniMax 适配回归（防止长章节断流 / tool 历史兼容回退）", () => {
+    it("transportDefaults.stream 显式为 true（v1.6.3+；之前为 false 导致长篇写一半断流）", () => {
+      const minimax = getEndpoint("minimax");
+      expect(minimax?.transportDefaults?.stream).toBe(true);
+    });
+
+    it("compat.requiresAssistantAfterToolResult=true，桥接 tool_call 历史结尾", () => {
+      const minimax = getEndpoint("minimax");
+      expect(minimax?.compat?.requiresAssistantAfterToolResult).toBe(true);
+    });
+
+    it("M3 / M2.7 系列标了 reasoning + tools 能力（供 inkos.json / Studio UI 使用）", () => {
+      const minimax = getEndpoint("minimax");
+      for (const id of ["MiniMax-M3", "MiniMax-M3-highspeed", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"]) {
+        const m = minimax?.models.find((x) => x.id === id);
+        expect(m?.capabilities?.text, `${id} capabilities.text`).toBe(true);
+        expect(m?.capabilities?.tools, `${id} capabilities.tools`).toBe(true);
+        expect(m?.capabilities?.reasoning, `${id} capabilities.reasoning`).toBe(true);
+      }
+    });
+
+    it("M2 / M2.5 系列标了 tools（M2-her 因用途为角色对话标 tools=false）", () => {
+      const minimax = getEndpoint("minimax");
+      for (const id of ["MiniMax-M2", "MiniMax-M2.1", "MiniMax-M2.5"]) {
+        expect(minimax?.models.find((x) => x.id === id)?.capabilities?.tools, `${id} tools`).toBe(true);
+      }
+      expect(minimax?.models.find((x) => x.id === "M2-her")?.capabilities?.tools).toBe(false);
+    });
+  });
 });
