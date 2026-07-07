@@ -15,7 +15,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
     fileParallelism: false,
     // server.ts is large enough that first-load esbuild transforms can exceed
     // Vitest's default 5s timeout on a cold full-suite run.

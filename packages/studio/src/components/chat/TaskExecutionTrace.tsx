@@ -4,8 +4,8 @@ import { memo, useMemo } from "react";
 import {
   Reasoning,
   ReasoningTrigger,
-  ReasoningContent,
 } from "@/components/ai-elements/reasoning";
+import { CollapsibleContent } from "@/components/ui/collapsible";
 import { ChatMessage } from "./ChatMessage";
 import { ToolExecutionSteps, type ProposedActionDetails } from "./ToolExecutionSteps";
 import type { MessagePart } from "@/store/chat/types";
@@ -46,7 +46,13 @@ interface TaskExecutionTraceProps {
   readonly theme: Theme;
   readonly onProposedAction?: (details: ProposedActionDetails) => void;
   readonly onRejectProposedAction?: (details: ProposedActionDetails) => void;
-  readonly onOpenFilmStudio?: () => void;
+  readonly onOpenFilmStudio?: (projectId: string) => void;
+  /**
+   * Initial open state for the wrapper panel. Defaults to `false`. Pass
+   * `true` in tests / storybooks so the rendered body is visible without
+   * a click on the trigger.
+   */
+  readonly defaultOpen?: boolean;
 }
 
 /**
@@ -69,6 +75,7 @@ export const TaskExecutionTrace = memo(function TaskExecutionTrace({
   onProposedAction,
   onRejectProposedAction,
   onOpenFilmStudio,
+  defaultOpen,
 }: TaskExecutionTraceProps) {
   const items = useMemo(() => groupTraceParts(parts), [parts]);
 
@@ -142,7 +149,7 @@ export const TaskExecutionTrace = memo(function TaskExecutionTrace({
   }
 
   return (
-    <Reasoning isStreaming={isStreaming}>
+    <Reasoning isStreaming={isStreaming} defaultOpen={defaultOpen}>
       <ReasoningTrigger
         getThinkingMessage={(streaming) =>
           streaming
@@ -150,7 +157,13 @@ export const TaskExecutionTrace = memo(function TaskExecutionTrace({
             : <>思考 {thinkingCount} 次，执行 {toolCount} 条命令</>
         }
       />
-      <ReasoningContent>{renderedItems}</ReasoningContent>
+      {/* ReasoningContent's children type is narrowed to `string` so it can
+          hand off to <Streamdown>; our body is structured React (multiple
+          thinking/tool/text blocks), so we use a plain CollapsibleContent
+          that shares the same Radix Collapsible context as the trigger. */}
+      <CollapsibleContent className="mt-4 space-y-3 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:animate-in data-[state=open]:slide-in-from-top-2">
+        {renderedItems}
+      </CollapsibleContent>
     </Reasoning>
   );
 });

@@ -518,11 +518,15 @@ function textFromContent(content: unknown): string {
 
 function thinkingFromContent(content: unknown): string | undefined {
   if (!Array.isArray(content)) return undefined;
-  const value = content
+  const blocks = content
     .filter((block): block is Record<string, unknown> => isObject(block) && block.type === "thinking")
     .map((block) => typeof block.thinking === "string" ? block.thinking : "")
-    .join("");
-  return value || undefined;
+    .filter((value) => value.length > 0);
+  if (blocks.length === 0) return undefined;
+  // Match the separator joinThinking uses between sources so the merged
+  // `thinking` field on InteractionMessage looks the same whether it came
+  // from one content block, many content blocks, or `legacyDisplay.thinking`.
+  return blocks.join("\n\n---\n\n");
 }
 
 /**
