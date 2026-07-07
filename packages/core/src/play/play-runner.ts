@@ -104,6 +104,8 @@ export interface PlayOpeningSeedResult {
 export class PlayRunner {
   private readonly store: PlayStore;
   private readonly db: PlayReducerDB;
+  private readonly ownsDb: boolean;
+  private dbClosed = false;
   private readonly actionInterpreter: PlayActionInterpreterLike;
   private readonly worldMutator: PlayWorldMutatorLike;
   private readonly sceneRenderer: PlaySceneRendererLike;
@@ -111,6 +113,7 @@ export class PlayRunner {
 
   constructor(private readonly options: PlayRunnerOptions) {
     this.store = options.store ?? new PlayStore(options.projectRoot);
+    this.ownsDb = !options.db;
     this.db = options.db ?? createPlayDB(this.store.runDir(options.worldId, options.runId));
     if (!options.ctx && (!options.agents?.actionInterpreter || !options.agents.worldMutator || !options.agents.sceneRenderer)) {
       throw new Error("PlayRunner requires ctx when default play agents are used.");
@@ -120,6 +123,18 @@ export class PlayRunner {
     this.worldMutator = options.agents?.worldMutator ?? new PlayWorldMutatorAgent(ctx!);
     this.sceneRenderer = options.agents?.sceneRenderer ?? new PlaySceneRendererAgent(ctx!);
     this.sceneReconciler = options.agents?.sceneReconciler ?? (ctx ? new PlaySceneReconcilerAgent(ctx) : null);
+  }
+
+  /**
+   * 关闭 runner 自己创建的数据库连接（外部传入的 db 由调用方负责关闭）。
+   * SQLite 文件句柄不关闭时 Windows 上无法删除 play.db；node:sqlite 的
+   * close 不允许二次调用，所以这里做幂等保护。
+   */
+  close(): void {
+    if (this.ownsDb && !this.dbClosed) {
+      this.dbClosed = true;
+      (this.db as { close?: () => void }).close?.();
+    }
   }
 
   async seedOpening(input: {

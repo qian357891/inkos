@@ -70,6 +70,11 @@ function closePlayDB(db: PlayGraphDB): void {
   db.close?.();
 }
 
+// runnerFactory 注入的测试替身没有 close 方法，可选调用兜底。
+function closePlayRunner(runner: unknown): void {
+  (runner as { close?: () => void }).close?.();
+}
+
 function safePlayId(value: string | undefined, fallback: string): string {
   const raw = (value?.trim() || fallback).slice(0, 80);
   if (!raw || raw === "." || raw === ".." || raw.includes("/") || raw.includes("\\") || raw.includes("\0")) {
@@ -2014,6 +2019,8 @@ export function createPlayStepTool(
             error: err instanceof Error ? err.message : String(err),
           },
         );
+      } finally {
+        closePlayRunner(runner);
       }
 
       const db = createPlayDB(store.runDir(target.worldId, target.runId));
@@ -2078,52 +2085,57 @@ export function createPlayReviseTool(
         ctx,
       });
 
-      if (params.action === "restore_variant") {
-        const turn = params.turn;
-        const variantId = params.variantId?.trim();
-        if (typeof turn !== "number" || !Number.isFinite(turn) || !variantId) {
-          return textResult("恢复版本需要 turn 和 variantId。");
-        }
-        onUpdate?.(textResult(`Restoring play variant "${variantId}"...`));
-        const restored = await runner.restoreVariant({
-          turn: Math.trunc(turn),
-          variantId,
-        });
-        return textResult(
-          restored.sceneText || "已切换到指定互动回合版本。",
-          {
-            kind: "play_variant_restored",
-            worldId,
-            runId,
-            title: world.title,
-            turn: restored.turn,
-            variantId: restored.variantId,
-            sceneText: restored.sceneText,
-          },
-        );
-      }
-
-      const replacement = params.action === "edit_last_input" ? params.input?.trim() : undefined;
-      if (params.action === "edit_last_input" && !replacement) {
-        return textResult("编辑上一条玩家动作需要提供新的 input。");
-      }
-      onUpdate?.(textResult(params.action === "edit_last_input" ? "Replaying edited play turn..." : "Regenerating last play turn..."));
       let replay: PlayReplayResult;
+      // finally 关闭 runner 自建的 play.db 连接：句柄不关闭时 Windows 上无法删除数据库文件。
       try {
-        replay = await runner.regenerateLastTurn(replacement);
-      } catch (err) {
-        const isZh = (world.language ?? "zh") !== "en";
-        return textResult(
-          isZh
-            ? "（上一回合暂时不能安全重做。继续输入新的动作，我会从当前状态推进。）"
-            : "(The previous turn cannot be safely regenerated yet. Enter a new action and I will continue from the current state.)",
-          {
-            kind: "play_revise_failed",
-            worldId,
-            runId,
-            error: err instanceof Error ? err.message : String(err),
-          },
-        );
+        if (params.action === "restore_variant") {
+          const turn = params.turn;
+          const variantId = params.variantId?.trim();
+          if (typeof turn !== "number" || !Number.isFinite(turn) || !variantId) {
+            return textResult("恢复版本需要 turn 和 variantId。");
+          }
+          onUpdate?.(textResult(`Restoring play variant "${variantId}"...`));
+          const restored = await runner.restoreVariant({
+            turn: Math.trunc(turn),
+            variantId,
+          });
+          return textResult(
+            restored.sceneText || "已切换到指定互动回合版本。",
+            {
+              kind: "play_variant_restored",
+              worldId,
+              runId,
+              title: world.title,
+              turn: restored.turn,
+              variantId: restored.variantId,
+              sceneText: restored.sceneText,
+            },
+          );
+        }
+
+        const replacement = params.action === "edit_last_input" ? params.input?.trim() : undefined;
+        if (params.action === "edit_last_input" && !replacement) {
+          return textResult("编辑上一条玩家动作需要提供新的 input。");
+        }
+        onUpdate?.(textResult(params.action === "edit_last_input" ? "Replaying edited play turn..." : "Regenerating last play turn..."));
+        try {
+          replay = await runner.regenerateLastTurn(replacement);
+        } catch (err) {
+          const isZh = (world.language ?? "zh") !== "en";
+          return textResult(
+            isZh
+              ? "（上一回合暂时不能安全重做。继续输入新的动作，我会从当前状态推进。）"
+              : "(The previous turn cannot be safely regenerated yet. Enter a new action and I will continue from the current state.)",
+            {
+              kind: "play_revise_failed",
+              worldId,
+              runId,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          );
+        }
+      } finally {
+        closePlayRunner(runner);
       }
 
       const db = createPlayDB(store.runDir(worldId, runId));

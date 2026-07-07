@@ -692,4 +692,52 @@ describe("PlayRunner", () => {
       .resolves
       .toContain("版本B");
   });
+
+  it("close() does not close a caller-provided db", () => {
+    const db = new FakePlayDB() as FakePlayDB & { close: () => void };
+    db.close = vi.fn();
+    const runner = new PlayRunner({
+      projectRoot: root,
+      worldId: "close-owned-db",
+      runId: "main",
+      db,
+      agents: {
+        actionInterpreter: { interpret: vi.fn() },
+        worldMutator: { proposeMutation: vi.fn() },
+        sceneRenderer: { render: vi.fn() },
+      },
+    });
+
+    runner.close();
+
+    expect(db.close).not.toHaveBeenCalled();
+  });
+
+  it("close() releases the self-created db and is idempotent", async () => {
+    const store = new PlayStore(root);
+    await store.createWorld({
+      id: "close-self-db",
+      title: "收摊测试",
+      premise: "验证 runner 自建数据库连接会被关闭。",
+      language: "zh",
+      mode: "open",
+    });
+    await store.ensureRun("close-self-db", "main");
+    const runner = new PlayRunner({
+      projectRoot: root,
+      worldId: "close-self-db",
+      runId: "main",
+      agents: {
+        actionInterpreter: { interpret: vi.fn() },
+        worldMutator: { proposeMutation: vi.fn() },
+        sceneRenderer: { render: vi.fn() },
+      },
+    });
+
+    runner.close();
+    // Windows 上句柄未释放会让 play.db 无法删除；这里至少保证重复 close 不抛异常。
+    runner.close();
+
+    await expect(rm(join(root, "worlds", "close-self-db"), { recursive: true })).resolves.toBeUndefined();
+  });
 });
