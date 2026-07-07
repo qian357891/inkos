@@ -183,6 +183,126 @@ describe("storyboard creation runner", () => {
     expect(graph.nodes.some((node) => node.type === "start")).toBe(true);
   });
 
+  it("runs storyboard creation in English with English prompts and parses English section headings", async () => {
+    chatCompletionMock.mockResolvedValueOnce({
+      content: [
+        "# Cold Ledger Storyboard",
+        "",
+        "## Storyboard",
+        "Shot 1: The cashier pushes open the cold-storage door.",
+        "Shot 2: A flashlight beam sweeps across the old ledger pages.",
+        "",
+        "## Image Prompts",
+        "1. Prompt: cold-storage doorway, female cashier pushing the door, desaturated realism, 9:16",
+        "2. Prompt: close-up of an old ledger page, flashlight beam, oppressive mood",
+      ].join("\n"),
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+
+    const result = await runStoryboardCreation({
+      projectRoot: root,
+      runtime: makeRuntime(root),
+      title: "Cold Ledger",
+      instruction: "Break the novel excerpt into a storyboard.",
+      projectId: "cold-ledger-en",
+      visualStyle: "desaturated realism",
+      aspectRatio: "9:16",
+      language: "en",
+    });
+
+    const [, , messages] = chatCompletionMock.mock.calls[0]!;
+    const system = messages[0].content as string;
+    const user = messages[1].content as string;
+    expect(system).toContain("storyboard-creation tool");
+    expect(system).not.toMatch(/[一-鿿]/);
+    expect(user).toContain("## Storyboard Spec");
+    expect(user).toContain("## Image Prompts");
+    expect(user).not.toMatch(/[一-鿿]/);
+
+    await expect(readFile(join(root, result.specPath), "utf-8")).resolves.toContain(
+      "# Cold Ledger Storyboard Creation Spec",
+    );
+    const manifest = JSON.parse(
+      await readFile(join(root, result.assetsManifestPath), "utf-8"),
+    ) as StoryboardAssetsManifest;
+    expect(manifest.assets.map((asset) => [asset.shotId, asset.prompt])).toEqual([
+      ["shot-001", "cold-storage doorway, female cashier pushing the door, desaturated realism, 9:16"],
+      ["shot-002", "close-up of an old ledger page, flashlight beam, oppressive mood"],
+    ]);
+  });
+
+  it("runs interactive-film creation in English and splits the package by English headings", async () => {
+    chatCompletionMock.mockResolvedValueOnce({
+      content: [
+        "# Crown Feast Interactive Film Package",
+        "",
+        "## Story Tree",
+        "- N1 The banquet hall -> choice A reveal the letter / choice B hide the letter",
+        "",
+        "## Variables and Flags",
+        "| Variable | Meaning | Trigger |",
+        "| --- | --- | --- |",
+        "| trust_guard | Guard's trust | Hand over the evidence |",
+        "",
+        "## Ending Paths",
+        "- Truth ending: trust_guard + letter_public",
+        "",
+        "## Interactive Script",
+        "### Node N1",
+        "Player choice: reveal the letter / hide the letter",
+        "",
+        "## Storyboard and Image Prompts",
+        "Shot 1: The envoy unfolds the letter by candlelight.",
+        "Prompt: medieval banquet hall, envoy holding a letter, candlelight, cinematic, 16:9",
+      ].join("\n"),
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+    chatCompletionMock.mockResolvedValueOnce({
+      content: "I cannot produce JSON, but I can summarize the plot.",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+
+    const result = await runInteractiveFilmCreation({
+      projectRoot: root,
+      runtime: makeRuntime(root),
+      title: "Crown Feast",
+      instruction: "Build a multi-ending interactive film.",
+      projectId: "crown-feast",
+      language: "en",
+    });
+
+    const [, , messages] = chatCompletionMock.mock.calls[0]!;
+    const system = messages[0].content as string;
+    const user = messages[1].content as string;
+    expect(system).toContain("interactive-film creation tool");
+    expect(system).not.toMatch(/[一-鿿]/);
+    expect(user).toContain("## Story Tree");
+    expect(user).toContain("## Variables and Flags");
+    expect(user).toContain("## Interactive Script");
+    expect(user).toContain("## Storyboard and Image Prompts");
+    expect(user).not.toMatch(/[一-鿿]/);
+
+    await expect(readFile(join(root, result.specPath), "utf-8")).resolves.toContain(
+      "Interactive Film Creation Spec",
+    );
+    const storyTree = await readFile(join(root, result.storyTreePath), "utf-8");
+    expect(storyTree).toContain("N1 The banquet hall");
+    expect(storyTree).not.toContain("trust_guard");
+    await expect(readFile(join(root, result.flagsPath), "utf-8")).resolves.toContain("trust_guard");
+    await expect(readFile(join(root, result.scriptPath), "utf-8")).resolves.toContain("Node N1");
+    await expect(readFile(join(root, result.storyboardPath), "utf-8")).resolves.toContain("Shot 1");
+    await expect(readFile(join(root, result.imagePromptsPath), "utf-8")).resolves.toContain(
+      "medieval banquet hall",
+    );
+
+    const graph = await loadStoryGraph(root, "crown-feast");
+    expect(graph).not.toBeNull();
+    if (!graph) throw new Error("Expected fallback story graph");
+    expect(graph.title).toBe("Crown Feast");
+    expect(JSON.stringify(graph)).not.toMatch(/[一-鿿]/);
+    expect(graph.nodes.find((node) => node.id === "start")?.title).toBe("Opening");
+  });
+
   it("falls back to a loadable story graph when graph JSON generation fails", async () => {
     chatCompletionMock.mockResolvedValueOnce({
       content: [

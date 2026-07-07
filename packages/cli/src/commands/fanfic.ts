@@ -3,9 +3,15 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import { deriveBookIdFromTitle, normalizePlatformOrOther, PipelineRunner, type BookConfig, type FanficMode } from "@actalk/inkos-core";
 import { loadConfig, buildPipelineConfig, findProjectRoot, resolveBookId, log, logError } from "../utils.js";
+import {
+  formatFanficCanonMissingError,
+  formatFanficInvalidModeError,
+  formatFanficSourceDirEmptyError,
+  formatFanficSourceTooShortError,
+} from "../localization.js";
 
 export const fanficCommand = new Command("fanfic")
-  .description("Fan fiction writing tools (同人创作)");
+  .description("Fan fiction writing tools");
 
 fanficCommand
   .command("init")
@@ -26,7 +32,7 @@ fanficCommand
 
       const mode = opts.mode as FanficMode;
       if (!["canon", "au", "ooc", "cp"].includes(mode)) {
-        throw new Error(`无效的同人模式："${mode}"。可选：canon, au, ooc, cp`);
+        throw new Error(formatFanficInvalidModeError(mode));
       }
 
       // Read source material
@@ -35,7 +41,7 @@ fanficCommand
       const sourceName = basename(sourcePath);
 
       if (!sourceText || sourceText.length < 100) {
-        throw new Error(`源素材文件内容过短（${sourceText.length} 字符）。请提供至少 100 字符的原作素材。`);
+        throw new Error(formatFanficSourceTooShortError(sourceText.length));
       }
 
       const bookId = deriveBookIdFromTitle(opts.title) || `book-${Date.now().toString(36)}`;
@@ -107,7 +113,7 @@ fanficCommand
       try {
         canon = await readFile(join(bookDir, "story/fanfic_canon.md"), "utf-8");
       } catch {
-        throw new Error(`该书没有同人正典文件。用 inkos fanfic init 创建同人书。`);
+        throw new Error(formatFanficCanonMissingError());
       }
 
       if (opts.json) {
@@ -172,7 +178,7 @@ async function readSourceMaterial(sourcePath: string): Promise<string> {
     const files = await readdir(sourcePath);
     const textFiles = files.filter((f) => f.endsWith(".txt") || f.endsWith(".md"));
     if (textFiles.length === 0) {
-      throw new Error(`目录 ${sourcePath} 中没有 .txt 或 .md 文件。`);
+      throw new Error(formatFanficSourceDirEmptyError(sourcePath));
     }
     const contents = await Promise.all(
       textFiles.sort().map((f) => readFile(join(sourcePath, f), "utf-8")),

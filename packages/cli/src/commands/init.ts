@@ -21,15 +21,18 @@ export const initCommand = new Command("init")
       log(`Project initialized at ${projectDir}`);
       log("");
       const isEnglish = (opts.lang ?? "zh") === "en";
-      const exampleCreate = isEnglish
-        ? "  inkos book create --title 'My Novel' --genre progression --platform royalroad --lang en"
-        : "  inkos book create --title '我的小说' --genre xuanhuan --platform tomato";
+      const exampleCreateLines = isEnglish
+        ? ["  inkos book create --title 'My Novel' --genre progression --platform royalroad --lang en"]
+        : [
+          "  inkos book create --title '我的小说' --genre xuanhuan --platform tomato",
+          "  # English project? Re-run with: inkos init --lang en",
+        ];
       if (global) {
         log("Global LLM config detected. Ready to go!");
         log("");
         log("Next steps:");
         if (name) log(`  cd ${name}`);
-        log(exampleCreate);
+        for (const line of exampleCreateLines) log(line);
       } else {
         log("Next steps:");
         if (name) log(`  cd ${name}`);
@@ -37,7 +40,7 @@ export const initCommand = new Command("init")
         log("  inkos config set-global --provider openai --base-url <your-api-url> --api-key <your-key> --model <your-model>");
         log("  # Option 2: Edit .env for this project only");
         log("");
-        log(exampleCreate);
+        for (const line of exampleCreateLines) log(line);
       }
       log("  inkos write next <book-id>");
     } catch (e) {

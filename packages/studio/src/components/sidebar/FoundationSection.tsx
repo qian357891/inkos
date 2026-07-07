@@ -3,7 +3,8 @@ import { FileText } from "lucide-react";
 import { useChatStore } from "../../store/chat";
 import { fetchJson } from "../../hooks/use-api";
 import { SidebarCard } from "./SidebarCard";
-import { FOUNDATION_FILE_LABELS, FOUNDATION_FILE_ORDER } from "../../lib/truth-display";
+import { tr } from "../../lib/app-language";
+import { foundationFileLabel, FOUNDATION_FILE_ORDER } from "../../lib/truth-display";
 
 interface TruthFileInfo {
   name: string;
@@ -30,13 +31,13 @@ export function FoundationSection({ bookId }: FoundationSectionProps) {
   }, [bookId, bookDataVersion]);
 
   const available = files
-    .filter((f) => !f.legacy && FOUNDATION_FILE_LABELS[f.name] !== undefined)
+    .filter((f) => !f.legacy && foundationFileLabel(f.name) !== undefined)
     .sort((a, b) => FOUNDATION_FILE_ORDER.indexOf(a.name) - FOUNDATION_FILE_ORDER.indexOf(b.name));
 
   if (available.length === 0) return null;
 
   return (
-    <SidebarCard title="核心文件">
+    <SidebarCard title={tr("核心文件", "Core Files")}>
       <ul className="space-y-1">
         {available.map((item) => (
           <li key={item.name}>
@@ -45,7 +46,7 @@ export function FoundationSection({ bookId }: FoundationSectionProps) {
               className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-[15px] leading-6 font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors font-['SimSun','Songti_SC','STSong',serif]"
             >
               <FileText size={16} className="shrink-0 text-muted-foreground/60" />
-              <span className="truncate">{FOUNDATION_FILE_LABELS[item.name]}</span>
+              <span className="truncate">{foundationFileLabel(item.name)}</span>
             </button>
           </li>
         ))}

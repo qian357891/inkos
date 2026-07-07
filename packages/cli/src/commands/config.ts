@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { findProjectRoot, log, logError, GLOBAL_CONFIG_DIR, GLOBAL_ENV_PATH } from "../utils.js";
 import { listModelsForService } from "@actalk/inkos-core";
+import { formatListModelsEmpty, formatListModelsHeader, resolveCliLanguage } from "../localization.js";
 
 export const configCommand = new Command("config")
   .description("Manage project configuration");
@@ -308,16 +309,17 @@ configCommand
   .option("--json", "Output as JSON")
   .action(async (service: string, opts: { apiKey?: string; baseUrl?: string; json?: boolean }) => {
     const apiKey = opts.apiKey ?? process.env.INKOS_LLM_API_KEY;
+    const language = resolveCliLanguage();
     const models = await listModelsForService(service, apiKey, opts.baseUrl);
     if (models.length === 0) {
-      logError(`${service} 没有可用模型（可能需要 --api-key 和 --base-url）`);
+      logError(formatListModelsEmpty(language, service));
       process.exit(1);
     }
     if (opts.json) {
       log(JSON.stringify(models, null, 2));
       return;
     }
-    log(`${service}：${models.length} 个模型\n`);
+    log(`${formatListModelsHeader(language, service, models.length)}\n`);
     for (const m of models) {
       const maxOut = m.maxOutput ? `out=${m.maxOutput}` : "out=?";
       const ctx = m.contextWindow > 0 ? `ctx=${m.contextWindow}` : "ctx=?";

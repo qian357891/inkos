@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApi, fetchJson, buildApiUrl } from "../hooks/use-api";
 import { useColors } from "../hooks/use-colors";
+import { tr } from "../lib/app-language";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { StoryGraph, StoryNode } from "@actalk/inkos-core/interactive-film/graph-schema";
@@ -85,21 +86,21 @@ export function StoryGraphTree({
             className={`ml-auto px-3 py-1 rounded ${c.btnPrimary}`}
             data-testid="film-play"
           >
-            试玩 →
+            {tr("试玩", "Play")} →
           </button>
           <button
             onClick={() => nav.toFlow(projectId)}
             className={`px-3 py-1 rounded ${c.btnSecondary}`}
             data-testid="open-flow"
           >
-            流程图 →
+            {tr("流程图", "Flow")} →
           </button>
           <button
             onClick={() => nav.toFilmAuthor(projectId)}
             className={`px-3 py-1 rounded ${c.btnSecondary}`}
             data-testid="open-authoring"
           >
-            AI 对话创作 →
+            {tr("AI 对话创作", "AI chat authoring")} →
           </button>
           {exportUrl && (
             <a
@@ -108,7 +109,7 @@ export function StoryGraphTree({
               className={`px-3 py-1 rounded ${c.btnSecondary}`}
               data-testid="film-export-package"
             >
-              导出整包
+              {tr("导出整包", "Export package")}
             </a>
           )}
         </div>
@@ -118,15 +119,15 @@ export function StoryGraphTree({
 
       {saveError && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="film-save-error">
-          保存失败：{saveError}
+          {tr("保存失败：", "Save failed: ")}{saveError}
         </div>
       )}
 
       {graph.worldAnchor && (
         <div className="border rounded p-3 text-sm" data-testid="film-world">
-          <div className={c.muted}>世界锚点</div>
-          <div>核心：{graph.worldAnchor.storyCore}</div>
-          <div>主题：{graph.worldAnchor.theme} · 题材：{graph.worldAnchor.genre}</div>
+          <div className={c.muted}>{tr("世界锚点", "World anchor")}</div>
+          <div>{tr("核心：", "Core: ")}{graph.worldAnchor.storyCore}</div>
+          <div>{tr("主题：", "Theme: ")}{graph.worldAnchor.theme} · {tr("题材：", "Genre: ")}{graph.worldAnchor.genre}</div>
         </div>
       )}
 
@@ -190,7 +191,7 @@ function NodeEditor({
         <div className="mt-2 space-y-1">
           {node.dialogue.map((l, i) => (
             <div key={i} className="text-xs">
-              <span className={colors.accent}>{l.speaker}：</span>
+              <span className={colors.accent}>{l.speaker}{tr("：", ": ")}</span>
               {l.text}
             </div>
           ))}
@@ -203,7 +204,7 @@ function NodeEditor({
           onClick={() => onSave({ ...node, sceneDesc: scene })}
           className={`px-3 py-1 text-xs rounded ${colors.btnPrimary} disabled:opacity-40`}
         >
-          {saving ? "保存中…" : "保存"}
+          {saving ? tr("保存中…", "Saving…") : tr("保存", "Save")}
         </button>
         <button
           data-testid={`gen-image-${node.id}`}
@@ -211,7 +212,7 @@ function NodeEditor({
           onClick={() => onGenerateImage(node.id)}
           className={`px-3 py-1 text-xs rounded ${colors.btnSecondary} disabled:opacity-40`}
         >
-          {generating ? "生成中…" : "生成配图"}
+          {generating ? tr("生成中…", "Generating…") : tr("生成配图", "Generate image")}
         </button>
       </div>
     </div>

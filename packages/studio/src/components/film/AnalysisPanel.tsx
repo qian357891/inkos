@@ -1,5 +1,6 @@
 import { useApi } from "../../hooks/use-api";
 import { useColors } from "../../hooks/use-colors";
+import { tr } from "../../lib/app-language";
 import type { Theme } from "../../hooks/use-theme";
 
 // ---------------------------------------------------------------------------
@@ -106,10 +107,10 @@ function IssuesList({ report, c }: { report: AnalysisReport; c: Colors }) {
   return (
     <div className="border border-border rounded p-3" data-testid="validation-panel">
       <div className={`text-sm font-medium ${c.muted}`}>
-        校验{report.ok ? "" : "（有阻断问题）"}
+        {tr("校验", "Validation")}{report.ok ? "" : tr("（有阻断问题）", " (blocking issues)")}
       </div>
       {report.issues.length === 0 ? (
-        <div className={`text-sm mt-1 ${c.muted}`}>无问题</div>
+        <div className={`text-sm mt-1 ${c.muted}`}>{tr("无问题", "No issues")}</div>
       ) : (
         <ul className="mt-1 space-y-1">
           {report.issues.map((issue, i) => (
@@ -135,15 +136,15 @@ function EmotionArcChart({ arcs, c }: { arcs: EmotionArcs; c: Colors }) {
 
   return (
     <div data-testid="emotion-arc" className="border border-border rounded p-3">
-      <div className={`text-sm font-medium mb-2 ${c.muted}`}>情感曲线</div>
+      <div className={`text-sm font-medium mb-2 ${c.muted}`}>{tr("情感曲线", "Emotion arcs")}</div>
       {displayArcs.length === 0 ? (
-        <div className={`text-sm ${c.muted}`}>暂无可分析路径</div>
+        <div className={`text-sm ${c.muted}`}>{tr("暂无可分析路径", "No paths to analyze")}</div>
       ) : (
         <>
           <svg
             width="100%"
             viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-            aria-label="情感曲线图"
+            aria-label={tr("情感曲线图", "Emotion arc chart")}
             className="rounded bg-muted/10"
             style={{ maxHeight: SVG_H }}
           >
@@ -182,14 +183,14 @@ function EmotionArcChart({ arcs, c }: { arcs: EmotionArcs; c: Colors }) {
                   className="inline-block w-4 h-0.5 rounded-full"
                   style={{ background: ARC_STROKE_COLORS[idx % ARC_STROKE_COLORS.length] }}
                 />
-                <span className={c.muted}>{arc.endingId ?? "无结局"}</span>
+                <span className={c.muted}>{arc.endingId ?? tr("无结局", "No ending")}</span>
               </span>
             ))}
           </div>
           {(overLimit || arcs.truncated) && (
             <div className={`text-xs mt-1 ${c.muted}`}>
-              {overLimit && `仅显示前 ${MAX_ARC_DISPLAY} 条路径`}
-              {arcs.truncated && "（路径总数已超过枚举上限）"}
+              {overLimit && tr(`仅显示前 ${MAX_ARC_DISPLAY} 条路径`, `Showing first ${MAX_ARC_DISPLAY} paths only`)}
+              {arcs.truncated && tr("（路径总数已超过枚举上限）", " (total paths exceed the enumeration limit)")}
             </div>
           )}
         </>
@@ -213,16 +214,16 @@ function PathDistributionPanel({
 
   return (
     <div data-testid="path-distribution" className="border border-border rounded p-3">
-      <div className={`text-sm font-medium mb-2 ${c.muted}`}>路径分布</div>
+      <div className={`text-sm font-medium mb-2 ${c.muted}`}>{tr("路径分布", "Path distribution")}</div>
 
       {distribution.truncated && (
         <div className={`text-xs mb-2 ${c.muted}`}>
-          路径过多，仅统计前 {distribution.total} 条
+          {tr(`路径过多，仅统计前 ${distribution.total} 条`, `Too many paths; only the first ${distribution.total} are counted`)}
         </div>
       )}
 
       {endingEntries.length === 0 ? (
-        <div className={`text-sm ${c.muted}`}>暂无路径数据</div>
+        <div className={`text-sm ${c.muted}`}>{tr("暂无路径数据", "No path data")}</div>
       ) : (
         <div className="space-y-1.5 mb-4">
           {endingEntries.map(([endingId, count]) => {
@@ -252,7 +253,7 @@ function PathDistributionPanel({
 
       {histEntries.length > 0 && (
         <div>
-          <div className={`text-xs font-medium mb-2 ${c.muted}`}>路径长度分布</div>
+          <div className={`text-xs font-medium mb-2 ${c.muted}`}>{tr("路径长度分布", "Path length distribution")}</div>
           <div className="flex items-end gap-1 h-12">
             {histEntries.map(({ len, count }) => {
               const heightPct = (count / maxHistCount) * 100;
@@ -264,7 +265,7 @@ function PathDistributionPanel({
                   <div
                     className="w-full bg-primary/50 rounded-t"
                     style={{ height: `${heightPct}%` }}
-                    title={`长度 ${len}: ${count} 条`}
+                    title={tr(`长度 ${len}: ${count} 条`, `Length ${len}: ${count} paths`)}
                   />
                   <span className={`text-xs leading-none ${c.muted}`}>{len}</span>
                 </div>
@@ -294,15 +295,15 @@ export function AnalysisPanel({
   );
 
   if (loading) {
-    return <div className={`p-4 text-sm ${c.muted}`}>正在加载分析结果…</div>;
+    return <div className={`p-4 text-sm ${c.muted}`}>{tr("正在加载分析结果…", "Loading analysis…")}</div>;
   }
 
   if (error) {
-    return <div className="p-4 text-sm text-destructive">加载失败：{error}</div>;
+    return <div className="p-4 text-sm text-destructive">{tr("加载失败：", "Load failed: ")}{error}</div>;
   }
 
   if (!data) {
-    return <div className={`p-4 text-sm ${c.muted}`}>暂无分析数据</div>;
+    return <div className={`p-4 text-sm ${c.muted}`}>{tr("暂无分析数据", "No analysis data")}</div>;
   }
 
   return (

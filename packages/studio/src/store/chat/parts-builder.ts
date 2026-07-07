@@ -1,5 +1,6 @@
 import type { MessagePart, ToolExecution, PipelineStage } from "./types";
 import { localizeKnownRuntimeMessage } from "../../lib/error-copy";
+import { tr } from "../../lib/app-language";
 
 // -- Event types for the builder --
 
@@ -30,25 +31,31 @@ export interface ContextCompressionStreamEvent {
 
 // -- Label helpers --
 
-const AGENT_LABELS: Record<string, string> = {
-  architect: "建书", writer: "写作", auditor: "审计",
-  reviser: "修订", exporter: "导出",
+// [zh, en] tuples resolved through tr() at call time so labels follow the
+// current app language instead of the language active at module load.
+const AGENT_LABELS: Record<string, readonly [string, string]> = {
+  architect: ["建书", "Create book"], writer: ["写作", "Write"], auditor: ["审计", "Audit"],
+  reviser: ["修订", "Revise"], exporter: ["导出", "Export"],
 };
-const TOOL_LABELS: Record<string, string> = {
-  read: "读取文件", edit: "编辑文件", grep: "搜索", ls: "列目录",
-  context_compression: "整理上下文",
-  propose_action: "确认动作",
-  short_fiction_run: "短篇生产",
-  generate_cover: "生成封面",
-  play_edit: "编辑互动世界",
-  play_start: "启动互动世界",
-  play_revise: "重做互动回合",
-  play_step: "推进互动世界",
+const TOOL_LABELS: Record<string, readonly [string, string]> = {
+  read: ["读取文件", "Read file"], edit: ["编辑文件", "Edit file"], grep: ["搜索", "Search"], ls: ["列目录", "List directory"],
+  context_compression: ["整理上下文", "Organize context"],
+  propose_action: ["确认动作", "Confirm action"],
+  short_fiction_run: ["短篇生产", "Short fiction run"],
+  generate_cover: ["生成封面", "Generate cover"],
+  play_edit: ["编辑互动世界", "Edit interactive world"],
+  play_start: ["启动互动世界", "Start interactive world"],
+  play_revise: ["重做互动回合", "Redo play turn"],
+  play_step: ["推进互动世界", "Advance interactive world"],
 };
 
 function resolveToolLabel(tool: string, agent?: string): string {
-  if (tool === "sub_agent" && agent) return AGENT_LABELS[agent] ?? agent;
-  return TOOL_LABELS[tool] ?? tool;
+  if (tool === "sub_agent" && agent) {
+    const label = AGENT_LABELS[agent];
+    return label ? tr(label[0], label[1]) : agent;
+  }
+  const label = TOOL_LABELS[tool];
+  return label ? tr(label[0], label[1]) : tool;
 }
 
 function summarizeToolResult(result: unknown): string {
@@ -71,22 +78,24 @@ function summarizeToolResult(result: unknown): string {
 }
 
 function compressionLabel(category: ContextCompressionCategory): string {
-  return category === "session_context" ? "整理会话记忆" : "压缩故事上下文";
+  return category === "session_context"
+    ? tr("整理会话记忆", "Organize session memory")
+    : tr("压缩故事上下文", "Compress story context");
 }
 
 function compressionSourceSummary(sources: readonly string[] | undefined): string {
   if (!sources || sources.length === 0) return "";
   const preview = sources.slice(0, 3).join(", ");
   const suffix = sources.length > 3 ? ` +${sources.length - 3}` : "";
-  return `来源 ${sources.length}: ${preview}${suffix}`;
+  return `${tr("来源", "sources")} ${sources.length}: ${preview}${suffix}`;
 }
 
 function compressionProgress(event: ContextCompressionStreamEvent): PipelineStage["progress"] | undefined {
   if (event.phase !== "start") return undefined;
   const parts = [
-    event.protectedTokens !== undefined ? `保护 ${event.protectedTokens}` : "",
-    event.compressibleTokens !== undefined ? `可压缩 ${event.compressibleTokens}` : "",
-    event.budgetTokens !== undefined ? `预算 ${event.budgetTokens}` : "",
+    event.protectedTokens !== undefined ? `${tr("保护", "protected")} ${event.protectedTokens}` : "",
+    event.compressibleTokens !== undefined ? `${tr("可压缩", "compressible")} ${event.compressibleTokens}` : "",
+    event.budgetTokens !== undefined ? `${tr("预算", "budget")} ${event.budgetTokens}` : "",
     compressionSourceSummary(event.sources),
   ].filter(Boolean);
   return {
@@ -120,7 +129,7 @@ function applyContextCompressionEvent(parts: MessagePart[], event: ContextCompre
     runningTool.stages = upsertCompressionStage(runningTool.stages, event);
     if (event.phase === "error") {
       runningTool.status = "error";
-      runningTool.error = event.message ?? `${compressionLabel(event.category)}失败`;
+      runningTool.error = event.message ?? `${compressionLabel(event.category)}${tr("失败", " failed")}`;
     }
     return;
   }
@@ -142,7 +151,7 @@ function applyContextCompressionEvent(parts: MessagePart[], event: ContextCompre
   execution.label = compressionLabel(event.category);
   execution.stages = upsertCompressionStage(execution.stages, event);
   if (event.phase !== "start") execution.completedAt = Date.now();
-  if (event.phase === "error") execution.error = event.message ?? `${compressionLabel(event.category)}失败`;
+  if (event.phase === "error") execution.error = event.message ?? `${compressionLabel(event.category)}${tr("失败", " failed")}`;
   if (!existing) parts.push({ type: "tool", execution });
 }
 

@@ -3,6 +3,64 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { listAvailableGenres, readGenreProfile, getBuiltinGenresDir } from "@actalk/inkos-core";
 import { findProjectRoot, log, logError } from "../utils.js";
+import { resolveCliLanguage, type CliLanguage } from "../localization.js";
+
+export function buildGenreTemplate(
+  params: {
+    readonly id: string;
+    readonly name: string;
+    readonly numerical: boolean;
+    readonly power: boolean;
+    readonly era: boolean;
+  },
+  language: CliLanguage = "zh",
+): string {
+  if (language === "en") {
+    return `---
+name: ${params.name}
+id: ${params.id}
+chapterTypes: ["progression", "setup", "transition", "payoff"]
+fatigueWords: ["shocked", "unbelievable", "incredible"]
+numericalSystem: ${params.numerical}
+powerScaling: ${params.power}
+eraResearch: ${params.era}
+pacingRule: "A clear advance or payoff every 2-3 chapters"
+satisfactionTypes: ["goal achieved", "obstacle overcome", "truth revealed"]
+auditDimensions: [1,2,3,6,7,8,9,10,13,14,15,16,17,18,19]
+---
+
+## Genre Taboos
+
+- (add taboos for this genre)
+
+## Narrative Guidance
+
+(describe the narrative focus and style requirements for this genre)
+`;
+  }
+
+  return `---
+name: ${params.name}
+id: ${params.id}
+chapterTypes: ["推进章", "布局章", "过渡章", "回收章"]
+fatigueWords: ["震惊", "不可思议", "难以置信"]
+numericalSystem: ${params.numerical}
+powerScaling: ${params.power}
+eraResearch: ${params.era}
+pacingRule: "每2-3章有一个明确的进展或反馈"
+satisfactionTypes: ["目标达成", "困难克服", "真相揭示"]
+auditDimensions: [1,2,3,6,7,8,9,10,13,14,15,16,17,18,19]
+---
+
+## 题材禁忌
+
+- (根据题材添加禁忌)
+
+## 叙事指导
+
+(根据题材描述叙事重心和风格要求)
+`;
+}
 
 export const genreCommand = new Command("genre")
   .description("Manage genre profiles");
@@ -74,6 +132,7 @@ genreCommand
   .option("--numerical", "Enable numerical system", false)
   .option("--power", "Enable power scaling", false)
   .option("--era", "Enable era research", false)
+  .option("--lang <language>", "Template language: zh or en (defaults to INKOS_LOCALE/LANG, then zh)")
   .action(async (id: string, opts) => {
     try {
       const root = findProjectRoot();
@@ -90,27 +149,16 @@ genreCommand
       await mkdir(genresDir, { recursive: true });
 
       const name = opts.name || id;
-      const template = `---
-name: ${name}
-id: ${id}
-chapterTypes: ["推进章", "布局章", "过渡章", "回收章"]
-fatigueWords: ["震惊", "不可思议", "难以置信"]
-numericalSystem: ${opts.numerical}
-powerScaling: ${opts.power}
-eraResearch: ${opts.era}
-pacingRule: "每2-3章有一个明确的进展或反馈"
-satisfactionTypes: ["目标达成", "困难克服", "真相揭示"]
-auditDimensions: [1,2,3,6,7,8,9,10,13,14,15,16,17,18,19]
----
-
-## 题材禁忌
-
-- (根据题材添加禁忌)
-
-## 叙事指导
-
-(根据题材描述叙事重心和风格要求)
-`;
+      const template = buildGenreTemplate(
+        {
+          id,
+          name,
+          numerical: opts.numerical,
+          power: opts.power,
+          era: opts.era,
+        },
+        resolveCliLanguage(opts.lang),
+      );
 
       await writeFile(filePath, template, "utf-8");
       log(`Created genre profile: ${filePath}`);

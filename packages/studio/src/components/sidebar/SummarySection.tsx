@@ -8,6 +8,7 @@ import { useChatStore } from "../../store/chat";
 import { fetchJson } from "../../hooks/use-api";
 import { SidebarCard } from "./SidebarCard";
 import { FrontmatterCards } from "./FrontmatterCards";
+import { tr } from "../../lib/app-language";
 import {
   firstParagraph,
   frontmatterToCards,
@@ -103,14 +104,14 @@ export function SummarySection({ bookId }: SummarySectionProps) {
     return (
       <>
         {legacy.world && (
-          <SidebarCard title="世界观">
+          <SidebarCard title={tr("世界观", "World")}>
             <Streamdown className={SIDEBAR_MD_CLASS} plugins={streamdownPlugins}>
               {legacy.world}
             </Streamdown>
           </SidebarCard>
         )}
         {(legacy.protagonist || legacy.cast) && (
-          <SidebarCard title="角色">
+          <SidebarCard title={tr("角色", "Characters")}>
             {legacy.protagonist && (
               <Streamdown className={SIDEBAR_MD_CLASS} plugins={streamdownPlugins}>
                 {legacy.protagonist}
@@ -136,20 +137,20 @@ export function SummarySection({ bookId }: SummarySectionProps) {
       onClick={() => openArtifact("outline/story_frame.md")}
       className="mt-2 text-[15px] leading-6 text-primary hover:underline font-['SimSun','Songti_SC','STSong',serif]"
     >
-      查看完整设定 →
+      {tr("查看完整设定 →", "View full foundation →")}
     </button>
   );
 
   return (
     <>
       {cards.length > 0 && (
-        <SidebarCard title="故事基石">
+        <SidebarCard title={tr("故事基石", "Story Foundation")}>
           <FrontmatterCards cards={cards} />
           {!worldOverview && openFull}
         </SidebarCard>
       )}
       {worldOverview && (
-        <SidebarCard title="世界观">
+        <SidebarCard title={tr("世界观", "World")}>
           <Streamdown className={SIDEBAR_MD_CLASS} plugins={streamdownPlugins}>
             {worldOverview}
           </Streamdown>

@@ -181,6 +181,68 @@ describe("script and storyboard creation helpers", () => {
     expect(spec).toContain("5000元");
   });
 
+  it("renders an English script spec with English headings and no Chinese text", () => {
+    const sourceText = "Chapter one. ".repeat(300);
+    const spec = renderScriptSpec({
+      title: "Cold Ledger",
+      sourceKind: "novel",
+      targetFormat: "vertical_short_drama",
+      sourceText,
+      requirements: "70% investigation, 30% family grudge.",
+      episodeCount: 12,
+      episodeDuration: "2 minutes",
+      language: "en",
+    });
+
+    expect(spec).toContain("# Cold Ledger Script Creation Spec");
+    expect(spec).toContain("Deliverable: vertical short drama");
+    expect(spec).toContain("- Episode/segment count: 12");
+    expect(spec).toContain("70% investigation, 30% family grudge.");
+    expect(spec).toContain("Full source material provided");
+    expect(spec).toContain(`${sourceText.replace(/\s+/g, " ").trim().length} characters`);
+    expect(spec).not.toMatch(/[一-鿿]/);
+  });
+
+  it("renders an English storyboard spec with English headings and no Chinese text", () => {
+    const spec = renderStoryboardSpec({
+      title: "Cold Ledger",
+      sourceKind: "script",
+      visualStyle: "desaturated realism",
+      aspectRatio: "9:16",
+      granularity: "split by scene and key shots",
+      maxShots: 18,
+      requirements: "Every shot needs a key prop.",
+      language: "en",
+    });
+
+    expect(spec).toContain("# Cold Ledger Storyboard Creation Spec");
+    expect(spec).toContain("- Shot granularity: split by scene and key shots");
+    expect(spec).toContain("- Aspect ratio: 9:16");
+    expect(spec).toContain("- Visual style: desaturated realism");
+    expect(spec).toContain("- Shot cap: 18");
+    expect(spec).toContain("Every shot needs a key prop.");
+    expect(spec).not.toMatch(/[一-鿿]/);
+  });
+
+  it("renders an English interactive-film spec with English headings and no Chinese text", () => {
+    const spec = renderInteractiveFilmSpec({
+      title: "Crown Feast",
+      sourceKind: "submission brief",
+      requirements: "Multiple endings; variables track every key decision.",
+      targetAudience: "Western interactive-film players",
+      budget: "USD 800",
+      referenceMode: "branch-heavy narrative",
+      language: "en",
+    });
+
+    expect(spec).toContain("# Crown Feast Interactive Film Creation Spec");
+    expect(spec).toContain("- Deliverable: interactive film");
+    expect(spec).toContain("- Target audience: Western interactive-film players");
+    expect(spec).toContain("- Budget constraint: USD 800");
+    expect(spec).toContain("Multiple endings; variables track every key decision.");
+    expect(spec).not.toMatch(/[一-鿿]/);
+  });
+
   it("builds a storyboard image asset manifest from editable prompts", () => {
     const manifest = createStoryboardAssetsManifest({
       title: "冷库账页",

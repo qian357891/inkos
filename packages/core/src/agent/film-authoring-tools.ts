@@ -35,11 +35,11 @@ function textResult<T = undefined>(text: string, details?: T): AgentToolResult<T
 // ---------------------------------------------------------------------------
 
 const WorldAnchorParams = Type.Object({
-  storyCore: Type.Optional(Type.String({ description: "故事核心一句话" })),
-  theme: Type.Optional(Type.String({ description: "主题" })),
-  genre: Type.Optional(Type.String({ description: "题材" })),
-  worldRules: Type.Optional(Type.String({ description: "世界规则" })),
-  durationMinutes: Type.Optional(Type.Number({ description: "目标时长（分钟）" })),
+  storyCore: Type.Optional(Type.String({ description: "one-sentence story core" })),
+  theme: Type.Optional(Type.String({ description: "theme of the story" })),
+  genre: Type.Optional(Type.String({ description: "genre, free text (e.g. suspense, romance)" })),
+  worldRules: Type.Optional(Type.String({ description: "world rules that constrain the plot" })),
+  durationMinutes: Type.Optional(Type.Number({ description: "target playthrough duration in minutes" })),
 });
 
 export function createSetWorldAnchorTool(projectRoot: string, projectId: string): AgentTool<typeof WorldAnchorParams> {
@@ -185,7 +185,15 @@ const FillNodeParams = Type.Object({
   instruction: Type.String({ description: "what this scene should contain (beats, who speaks, choices)" }),
 });
 
-const NODE_SYSTEM = `你是互动影游编剧。根据当前图上下文和指令，为指定节点生成 JSON（单个 StoryNode：type/title/sceneDesc/dialogue[]/choices[]），只输出 JSON。choices[].targetNodeId 必须指向已存在的节点 id。`;
+export type FilmAuthoringLanguage = "zh" | "en";
+
+const NODE_SYSTEM_ZH = `你是互动影游编剧。根据当前图上下文和指令，为指定节点生成 JSON（单个 StoryNode：type/title/sceneDesc/dialogue[]/choices[]），只输出 JSON。choices[].targetNodeId 必须指向已存在的节点 id。`;
+const NODE_SYSTEM_EN = `You are an interactive film scriptwriter. Using the current graph context and the instruction, generate JSON for the specified node (a single StoryNode: type/title/sceneDesc/dialogue[]/choices[]). Output JSON only. Every choices[].targetNodeId must point to an existing node id.`;
+
+function nodeSystemPrompt(language: FilmAuthoringLanguage): string {
+  return language === "en" ? NODE_SYSTEM_EN : NODE_SYSTEM_ZH;
+}
+
 const INTERACTIVE_FILM_AUTHORING_SKILL = "interactive-film-authoring";
 
 function graphUpdatedDetails(rev: number, promptId: string, extra: Record<string, unknown> = {}) {
@@ -202,6 +210,7 @@ export function createFillNodeTool(
   projectRoot: string,
   projectId: string,
   deps: FilmLLMDeps,
+  language: FilmAuthoringLanguage = "zh",
 ): AgentTool<typeof FillNodeParams> {
   return {
     name: "fill_node",
@@ -211,11 +220,14 @@ export function createFillNodeTool(
     async execute(_id, params: Static<typeof FillNodeParams>) {
       const graph = await loadStoryGraph(projectRoot, projectId);
       const context = graph ? buildFilmAuthoringContext(graph) : "(empty graph)";
-      const systemPrompt = await appendPromptPackGuidance(NODE_SYSTEM, {
+      const systemPrompt = await appendPromptPackGuidance(nodeSystemPrompt(language), {
         promptId: "interactive-film.script",
         projectRoot,
       });
-      const text = await deps.chat(systemPrompt, `${context}\n\n要填的节点 id：${params.nodeId}\n指令：${params.instruction}`);
+      const userPrompt = language === "en"
+        ? `${context}\n\nNode id to fill: ${params.nodeId}\nInstruction: ${params.instruction}`
+        : `${context}\n\n要填的节点 id：${params.nodeId}\n指令：${params.instruction}`;
+      const text = await deps.chat(systemPrompt, userPrompt);
       const { rev } = await applyGraphDelta({ projectRoot, projectId, delta: buildFillNodeDeltaFromLLMText(text, params.nodeId), phase: "workshop" });
       return textResult(`Node ${params.nodeId} filled (rev ${rev}).`, graphUpdatedDetails(rev, "interactive-film.script"));
     },
@@ -226,6 +238,7 @@ export function createReviseNodeTool(
   projectRoot: string,
   projectId: string,
   deps: FilmLLMDeps,
+  language: FilmAuthoringLanguage = "zh",
 ): AgentTool<typeof FillNodeParams> {
   return {
     name: "revise_node",
@@ -236,11 +249,14 @@ export function createReviseNodeTool(
       const graph = await loadStoryGraph(projectRoot, projectId);
       const context = graph ? buildFilmAuthoringContext(graph) : "(empty graph)";
       const current = graph?.nodes.find((n) => n.id === params.nodeId);
-      const systemPrompt = await appendPromptPackGuidance(NODE_SYSTEM, {
+      const systemPrompt = await appendPromptPackGuidance(nodeSystemPrompt(language), {
         promptId: "interactive-film.script",
         projectRoot,
       });
-      const text = await deps.chat(systemPrompt, `${context}\n\n要修改的节点 id：${params.nodeId}\n现有内容：${JSON.stringify(current ?? {})}\n修改指令：${params.instruction}`);
+      const userPrompt = language === "en"
+        ? `${context}\n\nNode id to revise: ${params.nodeId}\nCurrent content: ${JSON.stringify(current ?? {})}\nRevision instruction: ${params.instruction}`
+        : `${context}\n\n要修改的节点 id：${params.nodeId}\n现有内容：${JSON.stringify(current ?? {})}\n修改指令：${params.instruction}`;
+      const text = await deps.chat(systemPrompt, userPrompt);
       const { rev } = await applyGraphDelta({ projectRoot, projectId, delta: buildFillNodeDeltaFromLLMText(text, params.nodeId), phase: "workshop" });
       return textResult(`Node ${params.nodeId} revised (rev ${rev}).`, graphUpdatedDetails(rev, "interactive-film.script"));
     },
@@ -259,12 +275,14 @@ const DraftStructureParams = Type.Object({
   instruction: Type.String({ description: "what skeleton to draft (acts, branch points, endings)" }),
 });
 
-const STRUCT_SYSTEM = `你是互动影游编剧。根据上下文与指令，生成分支骨架 JSON：{ "nodes": [StoryNode...] }。恰好 1 个 type=start，至少 2 个 branch，至少 2 个差异化 ending 节点；每条路径都能到某个 ending；只输出 JSON。`;
+const STRUCT_SYSTEM_ZH = `你是互动影游编剧。根据上下文与指令，生成分支骨架 JSON：{ "nodes": [StoryNode...] }。恰好 1 个 type=start，至少 2 个 branch，至少 2 个差异化 ending 节点；每条路径都能到某个 ending；只输出 JSON。`;
+const STRUCT_SYSTEM_EN = `You are an interactive film scriptwriter. Using the context and the instruction, generate the branching skeleton as JSON: { "nodes": [StoryNode...] }. Exactly 1 node with type=start; at least 2 branch nodes; at least 2 clearly differentiated ending nodes; every path must reach some ending. Output JSON only.`;
 
 export function createDraftStructureTool(
   projectRoot: string,
   projectId: string,
   deps: FilmLLMDeps,
+  language: FilmAuthoringLanguage = "zh",
 ): AgentTool<typeof DraftStructureParams> {
   return {
     name: "draft_structure",
@@ -274,11 +292,14 @@ export function createDraftStructureTool(
     async execute(_id, params: Static<typeof DraftStructureParams>) {
       const graph = await loadStoryGraph(projectRoot, projectId);
       const context = graph ? buildFilmAuthoringContext(graph) : "(empty graph)";
-      const systemPrompt = await appendPromptPackGuidance(STRUCT_SYSTEM, {
+      const systemPrompt = await appendPromptPackGuidance(language === "en" ? STRUCT_SYSTEM_EN : STRUCT_SYSTEM_ZH, {
         promptId: "interactive-film.story-graph",
         projectRoot,
       });
-      const text = await deps.chat(systemPrompt, `${context}\n\n骨架指令：${params.instruction}`);
+      const userPrompt = language === "en"
+        ? `${context}\n\nSkeleton instruction: ${params.instruction}`
+        : `${context}\n\n骨架指令：${params.instruction}`;
+      const text = await deps.chat(systemPrompt, userPrompt);
       const { graph: next, rev } = await applyGraphDelta({ projectRoot, projectId, delta: buildStructureDeltaFromLLMText(text), phase: "structure" });
       return textResult(`Structure drafted: ${next.nodes.length} nodes (rev ${rev}).`, graphUpdatedDetails(rev, "interactive-film.story-graph"));
     },
@@ -391,18 +412,20 @@ export function createFilmAuthoringTools(params: {
   readonly llm: FilmLLMDeps;
   readonly proposeActionTool: AgentTool<any>;
   readonly confirmedIntent?: string;
+  readonly language?: FilmAuthoringLanguage;
 }): AgentTool<any>[] {
   const { projectRoot, projectId, llm } = params;
+  const language = params.language ?? "zh";
   const names = buildFilmAuthoringToolNames(params.confirmedIntent);
   const byName: Record<string, () => AgentTool<any>> = {
     set_world_anchor: () => createSetWorldAnchorTool(projectRoot, projectId),
     upsert_characters: () => createUpsertCharactersTool(projectRoot, projectId),
     add_variable: () => createAddVariableTool(projectRoot, projectId),
     define_ending: () => createDefineEndingTool(projectRoot, projectId),
-    fill_node: () => createFillNodeTool(projectRoot, projectId, llm),
-    revise_node: () => createReviseNodeTool(projectRoot, projectId, llm),
+    fill_node: () => createFillNodeTool(projectRoot, projectId, llm, language),
+    revise_node: () => createReviseNodeTool(projectRoot, projectId, llm, language),
     generate_node_image: () => createGenerateNodeImageTool(projectRoot, projectId),
-    draft_structure: () => createDraftStructureTool(projectRoot, projectId, llm),
+    draft_structure: () => createDraftStructureTool(projectRoot, projectId, llm, language),
     connect_choice: () => createConnectChoiceTool(projectRoot, projectId),
     remove_node: () => createRemoveNodeTool(projectRoot, projectId),
     propose_action: () => params.proposeActionTool,

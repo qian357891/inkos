@@ -16,6 +16,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useApi, fetchJson } from "../hooks/use-api";
 import { useColors } from "../hooks/use-colors";
+import { tr } from "../lib/app-language";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import { layoutStoryGraph } from "../lib/story-flow-layout";
@@ -215,7 +216,7 @@ export default function FlowView({
     if (conn.source === conn.target) return;
     const src = graph.nodes.find((g) => g.id === conn.source);
     if (!src) return;
-    await post(addChoiceDelta(src, { id: genChoiceId(), text: "新选项", targetNodeId: conn.target }));
+    await post(addChoiceDelta(src, { id: genChoiceId(), text: tr("新选项", "New choice"), targetNodeId: conn.target }));
   };
 
   const onNodesDelete = async (deleted: Array<{ id: string }>) => {
@@ -245,7 +246,7 @@ export default function FlowView({
       addNodeDelta({
         id: genNodeId(),
         type: "normal",
-        title: "新节点",
+        title: tr("新节点", "New node"),
         choices: [],
         position: { x: 80, y: 80 },
       } as never),
@@ -279,7 +280,7 @@ export default function FlowView({
           onClick={() => setEditing((v) => !v)}
           className={`ml-auto px-3 py-1 rounded text-xs ${c.btnSecondary}`}
         >
-          {editing ? "完成编辑" : "编辑"}
+          {editing ? tr("完成编辑", "Done editing") : tr("编辑", "Edit")}
         </button>
         {editing && (
           <button
@@ -287,7 +288,7 @@ export default function FlowView({
             onClick={onAddNode}
             className={`px-3 py-1 rounded text-xs ${c.btnSecondary}`}
           >
-            加节点
+            {tr("加节点", "Add node")}
           </button>
         )}
       </div>
@@ -301,22 +302,22 @@ export default function FlowView({
           data-testid="flow-stats"
           className="flex items-center gap-4 text-xs text-muted-foreground border border-border rounded px-3 py-1.5 bg-card shrink-0"
         >
-          <span>总节点 {stats.total}</span>
-          <span>分支 {stats.branch}</span>
-          <span>结局 {stats.ending}</span>
-          <span>死路 {stats.deadEnd}</span>
+          <span>{tr("总节点", "Nodes")} {stats.total}</span>
+          <span>{tr("分支", "Branches")} {stats.branch}</span>
+          <span>{tr("结局", "Endings")} {stats.ending}</span>
+          <span>{tr("死路", "Dead ends")} {stats.deadEnd}</span>
           <span className="ml-auto flex items-center gap-3">
             <span className="flex items-center gap-1">
               <span style={{ display: "inline-block", width: 20, height: 2, background: "#9ca3af", borderRadius: 1 }} />
-              默认
+              {tr("默认", "Default")}
             </span>
             <span className="flex items-center gap-1">
               <span style={{ display: "inline-block", width: 20, height: 2, background: "#f59e0b", borderRadius: 1 }} />
-              结局边
+              {tr("结局边", "Ending edge")}
             </span>
             <span className="flex items-center gap-1">
               <span style={{ display: "inline-block", width: 20, height: 2, background: "#8b5cf6", borderRadius: 1 }} />
-              悬停路径
+              {tr("悬停路径", "Hover path")}
             </span>
           </span>
         </div>

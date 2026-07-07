@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setAppLanguage } from "./app-language";
 import {
   FOUNDATION_FILE_LABELS,
   firstParagraph,
+  foundationFileLabel,
   frontmatterToCards,
   hasTableRows,
   parsePendingHooks,
@@ -239,5 +241,38 @@ describe("FOUNDATION_FILE_LABELS", () => {
     expect(FOUNDATION_FILE_LABELS["outline/volume_map.md"]).toBe("卷纲规划");
     // character files do not belong to the foundation list
     expect(FOUNDATION_FILE_LABELS["character_matrix.md"]).toBeUndefined();
+  });
+});
+
+describe("English UI (app language = en)", () => {
+  afterEach(() => {
+    setAppLanguage("zh");
+  });
+
+  it("frontmatterToCards emits English labels and fanfic-mode names", () => {
+    setAppLanguage("en");
+    const cards = frontmatterToCards({
+      protagonist: { name: "Mara" },
+      genreLock: { primary: "Urban Mystery" },
+      prohibitions: ["No time travel"],
+      fanficMode: "au",
+    });
+    expect(cards).toEqual([
+      { label: "Protagonist", values: ["Mara"] },
+      { label: "Genre", values: ["Urban Mystery"] },
+      { label: "Hard Lines", values: ["No time travel"] },
+      { label: "Fanfic Mode", values: ["Alternate Universe"] },
+    ]);
+  });
+
+  it("relabelOkrJargon leaves documents untouched (no zh labels in the English UI) and foundationFileLabel switches language", () => {
+    setAppLanguage("en");
+    const zhDoc = "## 各卷OKR（Objective + Key Results）\nKR1：账户达到80万。";
+    expect(relabelOkrJargon(zhDoc)).toBe(zhDoc);
+
+    expect(foundationFileLabel("outline/story_frame.md")).toBe("Story Foundation");
+    expect(foundationFileLabel("character_matrix.md")).toBeUndefined();
+    setAppLanguage("zh");
+    expect(foundationFileLabel("outline/story_frame.md")).toBe("故事基石");
   });
 });

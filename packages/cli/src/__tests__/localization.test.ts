@@ -5,15 +5,30 @@ import {
   formatBookCreateCreating,
   formatBookCreateCreated,
   formatBookCreateNextStep,
+  formatDoctorHintBaseUrl,
+  formatDoctorHintInvalidApiKey,
+  formatDoctorHintModelName,
+  formatDoctorHintOpenAiProbeExhausted,
+  formatDoctorHintQuota,
+  formatDoctorHintStreamRequirement,
+  formatFanficCanonMissingError,
+  formatFanficInvalidModeError,
+  formatFanficSourceDirEmptyError,
+  formatFanficSourceTooShortError,
   formatImportCanonComplete,
   formatImportCanonStart,
   formatImportChaptersComplete,
   formatImportChaptersDiscovery,
   formatImportChaptersResume,
+  formatListModelsEmpty,
+  formatListModelsHeader,
   formatWriteNextComplete,
   formatWriteNextProgress,
   formatWriteNextResultLines,
+  resolveCliLanguage,
 } from "../localization.js";
+
+const CHINESE_CHARS = /[一-鿿]/;
 
 describe("CLI localization", () => {
   it("formats book-create summaries in both languages", () => {
@@ -131,5 +146,98 @@ describe("CLI localization", () => {
       "Canon imported: story/parent_canon.md",
       "Writer and auditor will auto-detect this file for spinoff mode.",
     ]);
+  });
+});
+
+describe("resolveCliLanguage environment fallback", () => {
+  it("prefers the explicit language over any environment variable", () => {
+    expect(resolveCliLanguage("en", { INKOS_LOCALE: "zh_CN" })).toBe("en");
+    expect(resolveCliLanguage("zh", { INKOS_LOCALE: "en", LANG: "en_US.UTF-8" })).toBe("zh");
+  });
+
+  it("reads INKOS_LOCALE before the system locale variables", () => {
+    expect(resolveCliLanguage(undefined, { INKOS_LOCALE: "en", LANG: "zh_CN.UTF-8" })).toBe("en");
+    expect(resolveCliLanguage(undefined, { INKOS_LOCALE: "zh-CN", LC_ALL: "en_US.UTF-8" })).toBe("zh");
+  });
+
+  it("falls back to LC_ALL, then LC_MESSAGES, then LANG", () => {
+    expect(resolveCliLanguage(undefined, { LC_ALL: "en_US.UTF-8" })).toBe("en");
+    expect(resolveCliLanguage(undefined, { LC_MESSAGES: "en_GB.UTF-8" })).toBe("en");
+    expect(resolveCliLanguage(undefined, { LANG: "en_US.UTF-8" })).toBe("en");
+    expect(resolveCliLanguage(undefined, { LANG: "zh_CN.UTF-8" })).toBe("zh");
+  });
+
+  it("lets an unrecognized explicit language fall through to the environment", () => {
+    expect(resolveCliLanguage("fr", { LANG: "en_US.UTF-8" })).toBe("en");
+  });
+
+  it("defaults to zh when nothing is set or the locale is unrecognized", () => {
+    expect(resolveCliLanguage(undefined, {})).toBe("zh");
+    expect(resolveCliLanguage(undefined, { LANG: "C" })).toBe("zh");
+    expect(resolveCliLanguage("fr", {})).toBe("zh");
+  });
+});
+
+describe("config list-models localization", () => {
+  it("formats the empty-result error in both languages", () => {
+    expect(formatListModelsEmpty("zh", "deepseek"))
+      .toBe("deepseek 没有可用模型（可能需要 --api-key 和 --base-url）");
+    expect(formatListModelsEmpty("en", "deepseek"))
+      .toBe("No models available for deepseek (you may need --api-key and --base-url)");
+  });
+
+  it("formats the model-count header in both languages", () => {
+    expect(formatListModelsHeader("zh", "deepseek", 3)).toBe("deepseek：3 个模型");
+    expect(formatListModelsHeader("en", "deepseek", 3)).toBe("deepseek: 3 model(s)");
+  });
+});
+
+describe("doctor hint localization", () => {
+  it("keeps the original Chinese hints for zh", () => {
+    expect(formatDoctorHintQuota("zh"))
+      .toBe("检查 API Key 是否正确、模型是否可用，以及账号余额或配额是否足够。");
+    expect(formatDoctorHintBaseUrl("zh")).toContain("INKOS_LLM_BASE_URL");
+    expect(formatDoctorHintStreamRequirement("zh")).toContain("stream");
+    expect(formatDoctorHintModelName("zh")).toContain("INKOS_LLM_MODEL");
+    expect(formatDoctorHintInvalidApiKey("zh")).toContain("INKOS_LLM_API_KEY");
+    expect(formatDoctorHintOpenAiProbeExhausted("zh")).toContain("chat/responses");
+  });
+
+  it("emits pure English hints for en", () => {
+    const hints = [
+      formatDoctorHintQuota("en"),
+      formatDoctorHintOpenAiProbeExhausted("en"),
+      formatDoctorHintBaseUrl("en"),
+      formatDoctorHintStreamRequirement("en"),
+      formatDoctorHintModelName("en"),
+      formatDoctorHintInvalidApiKey("en"),
+    ];
+    for (const hint of hints) {
+      expect(hint).not.toMatch(CHINESE_CHARS);
+    }
+    expect(formatDoctorHintBaseUrl("en")).toContain("INKOS_LLM_BASE_URL");
+    expect(formatDoctorHintModelName("en")).toContain("INKOS_LLM_MODEL");
+    expect(formatDoctorHintInvalidApiKey("en")).toContain("INKOS_LLM_API_KEY");
+    expect(formatDoctorHintStreamRequirement("en")).toContain("stream=true");
+  });
+});
+
+describe("fanfic error localization", () => {
+  it("builds bilingual error messages", () => {
+    const invalidMode = formatFanficInvalidModeError("xx");
+    expect(invalidMode).toContain('Invalid fanfic mode: "xx"');
+    expect(invalidMode).toContain("无效的同人模式");
+
+    const tooShort = formatFanficSourceTooShortError(42);
+    expect(tooShort).toContain("Source material too short (42 chars)");
+    expect(tooShort).toContain("仅 42 字符");
+
+    const missingCanon = formatFanficCanonMissingError();
+    expect(missingCanon).toContain("inkos fanfic init");
+    expect(missingCanon).toContain("同人正典");
+
+    const emptyDir = formatFanficSourceDirEmptyError("/tmp/source");
+    expect(emptyDir).toContain("No .txt or .md files found in /tmp/source");
+    expect(emptyDir).toContain("目录 /tmp/source 中没有 .txt 或 .md 文件");
   });
 });

@@ -2,25 +2,33 @@ import { useEffect, useState } from "react";
 import type { SSEMessage } from "../../hooks/use-sse";
 import { Loader2, Check } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { tr } from "../../lib/app-language";
 import { SidebarCard } from "./SidebarCard";
 
-const INIT_BOOK_STEPS = [
-  "生成基础设定",
-  "保存书籍配置",
-  "写入基础设定文件",
-  "初始化控制文档",
-  "创建初始快照",
-] as const;
+// 每个步骤的 zh 文案同时也是与后台 SSE log 消息匹配的键（后台目前发中文消息）。
+// 展示时按当前语言取 zh/en，匹配时 zh、en 都认，后台消息以后双语化也不用改这里。
+interface ProgressStep {
+  readonly zh: string;
+  readonly en: string;
+}
 
-const WRITE_CHAPTER_STEPS = [
-  "准备章节输入",
-  "撰写章节草稿",
-  "落盘最终章节",
-  "生成最终真相文件",
-  "校验真相文件变更",
-  "同步记忆索引",
-  "更新章节索引与快照",
-] as const;
+const INIT_BOOK_STEPS: ReadonlyArray<ProgressStep> = [
+  { zh: "生成基础设定", en: "Generate foundation" },
+  { zh: "保存书籍配置", en: "Save book config" },
+  { zh: "写入基础设定文件", en: "Write foundation files" },
+  { zh: "初始化控制文档", en: "Initialize control docs" },
+  { zh: "创建初始快照", en: "Create initial snapshot" },
+];
+
+const WRITE_CHAPTER_STEPS: ReadonlyArray<ProgressStep> = [
+  { zh: "准备章节输入", en: "Prepare chapter input" },
+  { zh: "撰写章节草稿", en: "Draft the chapter" },
+  { zh: "落盘最终章节", en: "Save final chapter" },
+  { zh: "生成最终真相文件", en: "Generate final truth files" },
+  { zh: "校验真相文件变更", en: "Validate truth file changes" },
+  { zh: "同步记忆索引", en: "Sync memory index" },
+  { zh: "更新章节索引与快照", en: "Update chapter index and snapshot" },
+];
 
 type StepStatus = "pending" | "active" | "done";
 
@@ -47,9 +55,9 @@ export function ProgressSection({ sse }: ProgressSectionProps) {
       setCompletedSteps(new Set());
       setActiveStep(null);
     } else if (last.event === "book:created" || last.event === "write:complete") {
-      // Mark all steps done
+      // Mark all steps done (the set stores zh keys / raw backend messages)
       const steps = operation === "init" ? INIT_BOOK_STEPS : WRITE_CHAPTER_STEPS;
-      setCompletedSteps(new Set(steps));
+      setCompletedSteps(new Set(steps.map((s) => s.zh)));
       setActiveStep(null);
     } else if (last.event === "log") {
       const data = last.data as { message?: string } | null;
@@ -76,14 +84,15 @@ export function ProgressSection({ sse }: ProgressSectionProps) {
   if (!steps) return null;
 
   return (
-    <SidebarCard title="执行">
+    <SidebarCard title={tr("执行", "Progress")}>
       <ul className="space-y-2">
         {steps.map((step, i) => {
-          const status: StepStatus = completedSteps.has(step) ? "done"
-            : activeStep === step ? "active"
+          const status: StepStatus =
+            completedSteps.has(step.zh) || completedSteps.has(step.en) ? "done"
+            : activeStep === step.zh || activeStep === step.en ? "active"
             : "pending";
           return (
-            <li key={step} className="flex items-center gap-2.5">
+            <li key={step.zh} className="flex items-center gap-2.5">
               <StepIndicator index={i + 1} status={status} />
               <span className={cn(
                 "text-xs",
@@ -91,7 +100,7 @@ export function ProgressSection({ sse }: ProgressSectionProps) {
                 status === "active" && "text-foreground font-medium",
                 status === "pending" && "text-muted-foreground/50",
               )}>
-                {step}
+                {tr(step.zh, step.en)}
               </span>
             </li>
           );

@@ -1,5 +1,7 @@
 # Changelog
 
+[English](CHANGELOG.en.md) | 中文
+
 ## Unreleased
 
 ### Improvements
@@ -11,6 +13,7 @@
 - CLI 现在遵守书级 `writing.reviewMode`（此前 `inkos write next` 永远自动审查）；新增 `inkos auto [book-id] <目标章号>` 连续自动写作到指定章（#307）
 - 通知渠道支持 `format: text`（默认仍为 markdown）；`write next / write rewrite / auto / revise / audit` 新增 `--notify`，动作完成或失败后发送通知（#308）
 - Studio 新增"操作详情默认展开"浏览器偏好（项目设置 → 对话界面）；read/grep 等小工具行有结果时也可展开查看正文（#306）
+- 英文能力对齐批量改动：短篇 / 剧本 / 互动影游管线新增英文提示词分支，Studio 界面动态区补充中英双语文案，CLI 修复环境语言回退与硬编码中文输出；新增全量英文更新日志 `CHANGELOG.en.md` 并补齐英文 README 缺失章节
 
 ### Reliability And Fixes
 - **MiniMax stream 默认改为 true**：v1.6.2 之前 `transportDefaults: { stream: false }`，长章节（~1.4 万字）在 sync 模式下网络抖动直接触发 `PartialResponseError`，整章从头重写。改回 `true` 后走 SSE 增量，单次 timeout 风险显著下降，Studio UI 也能看到渐进写章节过程。用户可在 `inkos.json` / `INKOS_LLM_STREAM=false` 手动覆盖回 sync。

@@ -470,12 +470,12 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   }, [services, modelsByService]);
 
   const selectedModelLabel = useMemo(() => {
-    if (!selectedModel) return "选择模型";
+    if (!selectedModel) return isZh ? "选择模型" : "Select model";
     const group = groupedModels.find((item) => item.service === selectedService);
     const model = group?.models.find((item) => item.id === selectedModel);
     const modelLabel = model?.name ?? selectedModel;
     return group ? `${group.label} · ${modelLabel}` : modelLabel;
-  }, [groupedModels, selectedModel, selectedService]);
+  }, [groupedModels, selectedModel, selectedService, isZh]);
 
   // Auto-select from saved service config first, then fall back to the first available model.
   useEffect(() => {
@@ -723,7 +723,10 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     markProposalResolved(details.execId, "rejected");
     if (!activeSessionId) return;
     autoScrollPinnedRef.current = true;
-    await sendMessage(activeSessionId, `取消这次操作：${details.title ?? details.instruction}`, {
+    const rejectionText = isZh
+      ? `取消这次操作：${details.title ?? details.instruction}`
+      : `Cancel this action: ${details.title ?? details.instruction}`;
+    await sendMessage(activeSessionId, rejectionText, {
       activeBookId,
       sessionKind: currentSessionKind,
       actionSource: "button",
@@ -1078,7 +1081,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
               </div>
               <div className="flex items-center gap-2 px-3 pb-2 border-t border-border/20 pt-1.5">
                 {modelPickerStatus === "loading" ? (
-                  <span className="text-[15px] text-muted-foreground/40 animate-pulse">加载模型...</span>
+                  <span className="text-[15px] text-muted-foreground/40 animate-pulse">{isZh ? "加载模型..." : "Loading models..."}</span>
                 ) : modelPickerStatus === "ready" ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger className="flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-muted text-[16px] transition-colors cursor-pointer">
@@ -1100,7 +1103,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                     onClick={() => nav.toServices()}
                     className="text-[15px] text-muted-foreground/50 hover:text-primary transition-colors"
                   >
-                    配置模型 →
+                    {isZh ? "配置模型 →" : "Set up models →"}
                   </button>
                 )}
                 {currentSessionKind === "play" && (

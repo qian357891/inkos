@@ -30,8 +30,37 @@ function localize(language: CliLanguage, messages: { zh: string; en: string }): 
   return language === "en" ? messages.en : messages.zh;
 }
 
-export function resolveCliLanguage(language?: string): CliLanguage {
-  return language === "en" ? "en" : "zh";
+function normalizeCliLanguageTag(value: string | undefined): CliLanguage | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized.startsWith("en")) {
+    return "en";
+  }
+  if (normalized.startsWith("zh")) {
+    return "zh";
+  }
+  return undefined;
+}
+
+export function resolveCliLanguage(
+  language?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): CliLanguage {
+  const explicit = normalizeCliLanguageTag(language);
+  if (explicit) {
+    return explicit;
+  }
+
+  const requested = normalizeCliLanguageTag(env.INKOS_LOCALE);
+  if (requested) {
+    return requested;
+  }
+
+  const detected = normalizeCliLanguageTag(env.LC_ALL ?? env.LC_MESSAGES ?? env.LANG);
+  return detected ?? "zh";
 }
 
 export function formatBookCreateCreating(
@@ -335,4 +364,82 @@ export function formatImportCanonComplete(language: CliLanguage): string[] {
       en: "Writer and auditor will auto-detect this file for spinoff mode.",
     }),
   ];
+}
+
+export function formatListModelsEmpty(language: CliLanguage, service: string): string {
+  return localize(language, {
+    zh: `${service} 没有可用模型（可能需要 --api-key 和 --base-url）`,
+    en: `No models available for ${service} (you may need --api-key and --base-url)`,
+  });
+}
+
+export function formatListModelsHeader(
+  language: CliLanguage,
+  service: string,
+  count: number,
+): string {
+  return localize(language, {
+    zh: `${service}：${count} 个模型`,
+    en: `${service}: ${count} model(s)`,
+  });
+}
+
+export function formatDoctorHintQuota(language: CliLanguage): string {
+  return localize(language, {
+    zh: "检查 API Key 是否正确、模型是否可用，以及账号余额或配额是否足够。",
+    en: "Check that the API key is valid, the model is available, and the account has enough balance or quota.",
+  });
+}
+
+export function formatDoctorHintOpenAiProbeExhausted(language: CliLanguage): string {
+  return localize(language, {
+    zh: "当前已自动尝试 chat/responses 与流式开关组合；如果仍失败，问题更可能在模型名、baseUrl 路径或服务商兼容性本身。",
+    en: "All chat/responses and stream on/off combinations were already probed; if it still fails, the problem is more likely the model name, the baseUrl path, or provider compatibility itself.",
+  });
+}
+
+export function formatDoctorHintBaseUrl(language: CliLanguage): string {
+  return localize(language, {
+    zh: "baseUrl 可能不正确，检查 INKOS_LLM_BASE_URL 是否包含完整路径（如 /v1）",
+    en: "The baseUrl may be wrong. Check that INKOS_LLM_BASE_URL includes the full path (e.g. /v1).",
+  });
+}
+
+export function formatDoctorHintStreamRequirement(language: CliLanguage): string {
+  return localize(language, {
+    zh: "检查提供方文档，确认该接口要求 stream=true、stream=false，还是根本不支持 stream",
+    en: "Check the provider docs to confirm whether the endpoint requires stream=true, stream=false, or does not support streaming at all.",
+  });
+}
+
+export function formatDoctorHintModelName(language: CliLanguage): string {
+  return localize(language, {
+    zh: "检查模型名称是否正确（INKOS_LLM_MODEL）",
+    en: "Check that the model name is correct (INKOS_LLM_MODEL).",
+  });
+}
+
+export function formatDoctorHintInvalidApiKey(language: CliLanguage): string {
+  return localize(language, {
+    zh: "API Key 无效，检查 INKOS_LLM_API_KEY",
+    en: "The API key is invalid. Check INKOS_LLM_API_KEY.",
+  });
+}
+
+// Fanfic errors are intentionally bilingual in a single string: they can surface
+// through `--json` output or be rethrown before any book language is known.
+export function formatFanficInvalidModeError(mode: string): string {
+  return `Invalid fanfic mode: "${mode}". Valid modes: canon, au, ooc, cp（无效的同人模式："${mode}"，可选 canon、au、ooc、cp）`;
+}
+
+export function formatFanficSourceTooShortError(length: number): string {
+  return `Source material too short (${length} chars); provide at least 100 chars（源素材内容过短，仅 ${length} 字符，请提供至少 100 字符的原作素材）`;
+}
+
+export function formatFanficCanonMissingError(): string {
+  return "No fanfic canon found for this book. Create one with `inkos fanfic init`（该书没有同人正典文件，用 inkos fanfic init 创建同人书）";
+}
+
+export function formatFanficSourceDirEmptyError(sourcePath: string): string {
+  return `No .txt or .md files found in ${sourcePath}（目录 ${sourcePath} 中没有 .txt 或 .md 文件）`;
 }

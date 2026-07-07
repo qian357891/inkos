@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ToolExecution } from "../../../store/chat/types";
 import { PipelineResultDetails, ToolExecutionSteps, UtilityExecutionRow, buildPlayRunStatusUrl, buildPlaySceneImageUrl, getGeneratedArtifactDetails, getPlayEditDetails, getPlayToolDetails, getProposedActionContractRows, getProposedActionDetails, groupToolExecutionsChronologically } from "../ToolExecutionSteps";
 import { usePreferencesStore } from "../../../store/preferences";
+import { setAppLanguage } from "../../../lib/app-language";
 
 const makeExec = (overrides: Partial<ToolExecution> & { id: string; tool: string }): ToolExecution => ({
   label: "test",
@@ -510,6 +511,83 @@ describe("tool details default-open preference", () => {
     }));
 
     expect(html).toContain("<details open");
+  });
+});
+
+describe("English app language", () => {
+  beforeEach(() => {
+    setAppLanguage("en");
+  });
+
+  afterEach(() => {
+    setAppLanguage("zh");
+  });
+
+  it("renders pipeline status, result summary, and file-operation group in English", () => {
+    const execs: ToolExecution[] = [
+      makeExec({
+        id: "writer-en-1",
+        tool: "sub_agent",
+        agent: "writer",
+        label: "Write",
+        result: "Chapter 1 finished.",
+      }),
+      makeExec({ id: "read-en-1", tool: "read", label: "Read file", args: { path: "books/demo/chapter-1.md" } }),
+    ];
+
+    const html = renderToStaticMarkup(React.createElement(ToolExecutionSteps, { executions: execs }));
+
+    expect(html).toContain("Completed");
+    expect(html).toContain("View result");
+    expect(html).toContain("1 file operation");
+    expect(html).not.toContain("已完成");
+    expect(html).not.toContain("查看操作结果");
+  });
+
+  it("renders interactive-film artifacts and proposal contract rows in English", () => {
+    const filmExec = makeExec({
+      id: "interactive-film-en-1",
+      tool: "interactive_film_create",
+      label: "Interactive film",
+      details: {
+        kind: "interactive_film_created",
+        projectId: "demo-branching",
+        storyGraphPath: "interactive-films/demo-branching/story-graph.json",
+        storyTreePath: "interactive-films/demo-branching/story-tree.md",
+      },
+    });
+
+    const html = renderToStaticMarkup(React.createElement(ToolExecutionSteps, { executions: [filmExec] }));
+    expect(html).toContain("Interactive film generated");
+    expect(html).toContain("Story graph");
+    expect(html).toContain("Story tree");
+    expect(html).not.toContain("互动影游已生成");
+
+    const proposalExec = makeExec({
+      id: "proposal-en-1",
+      tool: "propose_action",
+      label: "Confirm action",
+      details: {
+        kind: "proposed_action",
+        action: "play_start",
+        targetSessionKind: "play",
+        instruction: "Start a cultivation open world.",
+        actionPayload: {
+          playStart: {
+            title: "Outer Gate",
+            worldContract: "Time is the shared world axis.",
+            visualContract: "No colored rarity borders.",
+          },
+        },
+      },
+    });
+
+    const details = getProposedActionDetails(proposalExec);
+    expect(details).not.toBeNull();
+    expect(getProposedActionContractRows(details!).map((row) => row.label)).toEqual([
+      "World contract",
+      "Visual contract",
+    ]);
   });
 });
 

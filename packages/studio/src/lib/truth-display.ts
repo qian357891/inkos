@@ -2,7 +2,11 @@
 // reader-facing content instead of raw structured/engineering text. Non-coder
 // authors should never see YAML frontmatter, generator scaffolding, or
 // deprecated compat-pointer prose — these helpers translate the on-disk format
-// into friendly cards and clean prose.
+// into friendly cards and clean prose. Display labels follow the app language
+// (getAppLanguage / tr); the default stays "zh" so existing behavior and tests
+// are unchanged.
+
+import { getAppLanguage, tr } from "./app-language";
 
 export interface TruthFrontmatter {
   readonly protagonist?: { readonly name?: string; readonly personalityLock?: ReadonlyArray<string> };
@@ -17,11 +21,11 @@ export interface DisplayCard {
   readonly values: ReadonlyArray<string>;
 }
 
-const FANFIC_LABELS: Record<string, string> = {
-  canon: "原著向",
-  au: "架空改编",
-  ooc: "OOC",
-  cp: "CP 向",
+const FANFIC_LABELS: Record<string, { readonly zh: string; readonly en: string }> = {
+  canon: { zh: "原著向", en: "Canon-compliant" },
+  au: { zh: "架空改编", en: "Alternate Universe" },
+  ooc: { zh: "OOC", en: "OOC" },
+  cp: { zh: "CP 向", en: "Pairing (CP)" },
 };
 
 // Turn the structured frontmatter of story_frame.md into a few reader-friendly
@@ -32,20 +36,24 @@ export function frontmatterToCards(fm: TruthFrontmatter | null | undefined): Rea
   if (!fm) return [];
   const cards: DisplayCard[] = [];
   const name = fm.protagonist?.name?.trim();
-  if (name) cards.push({ label: "主角", values: [name] });
+  if (name) cards.push({ label: tr("主角", "Protagonist"), values: [name] });
   const genre = fm.genreLock?.primary?.trim();
-  if (genre) cards.push({ label: "题材", values: [genre] });
+  if (genre) cards.push({ label: tr("题材", "Genre"), values: [genre] });
   const era = fm.eraConstraints;
   if (era?.enabled) {
     const eraValues = [era.period, era.region]
       .map((v) => v?.trim())
       .filter((v): v is string => Boolean(v));
-    if (eraValues.length > 0) cards.push({ label: "时代背景", values: eraValues });
+    if (eraValues.length > 0) cards.push({ label: tr("时代背景", "Era"), values: eraValues });
   }
   const prohibitions = (fm.prohibitions ?? []).map((p) => p.trim()).filter(Boolean);
-  if (prohibitions.length > 0) cards.push({ label: "红线", values: prohibitions });
+  if (prohibitions.length > 0) cards.push({ label: tr("红线", "Hard Lines"), values: prohibitions });
   if (fm.fanficMode) {
-    cards.push({ label: "同人模式", values: [FANFIC_LABELS[fm.fanficMode] ?? fm.fanficMode] });
+    const fanficLabel = FANFIC_LABELS[fm.fanficMode];
+    cards.push({
+      label: tr("同人模式", "Fanfic Mode"),
+      values: [fanficLabel ? tr(fanficLabel.zh, fanficLabel.en) : fm.fanficMode],
+    });
   }
   return cards;
 }
@@ -71,9 +79,11 @@ export function stripStructuralMarkers(text: string): string {
 // (各卷OKR（Objective + Key Results）, 全书Objective, KR1/KR2…). That's useful
 // content wearing engineering clothes — relabel it to plain Chinese for the
 // reader. Only touches Chinese documents so an English book's prose is left
-// intact (no zh labels spliced into English text). Display-only; raw file is
-// unchanged.
+// intact (no zh labels spliced into English text). In the English UI the
+// relabeling is skipped entirely — English readers should not have "Key
+// Results" rewritten into Chinese labels. Display-only; raw file is unchanged.
 export function relabelOkrJargon(text: string): string {
+  if (getAppLanguage() === "en") return text;
   if (!text || !/[一-鿿]/.test(text)) return text;
   return text
     .replace(/各卷\s*OKR\s*[（(]\s*Objective\s*\+\s*Key\s*Results\s*[）)]/gi, "各卷目标与关键节点")
@@ -114,7 +124,8 @@ export function roleFromPath(path: string): RoleRef | null {
 // Phase 5 outline/* layout and the pre-Phase-5 flat layout. Character files
 // (roles/*, character_matrix.md) are intentionally absent — they belong to the
 // character roster, not the foundation list. Files absent from this map are not
-// shown in the foundation list.
+// shown in the foundation list. This zh map is the registry of which files
+// qualify; use foundationFileLabel() for the language-aware display label.
 export const FOUNDATION_FILE_LABELS: Record<string, string> = {
   "outline/story_frame.md": "故事基石",
   "outline/volume_map.md": "卷纲规划",
@@ -128,6 +139,27 @@ export const FOUNDATION_FILE_LABELS: Record<string, string> = {
   "volume_outline.md": "卷纲规划",
   "book_rules.md": "叙事规则",
 };
+
+const FOUNDATION_FILE_LABELS_EN: Record<string, string> = {
+  "outline/story_frame.md": "Story Foundation",
+  "outline/volume_map.md": "Volume Map",
+  "current_state.md": "Current State",
+  "pending_hooks.md": "Hook Pool",
+  "emotional_arcs.md": "Emotional Arcs",
+  "subplot_board.md": "Subplot Board",
+  "story_bible.md": "World Bible",
+  "volume_outline.md": "Volume Map",
+  "book_rules.md": "Narrative Rules",
+};
+
+// Language-aware display label for a foundation truth file. Returns undefined
+// for files that are not part of the foundation list (same qualification as
+// FOUNDATION_FILE_LABELS).
+export function foundationFileLabel(name: string): string | undefined {
+  const zh = FOUNDATION_FILE_LABELS[name];
+  if (zh === undefined) return undefined;
+  return getAppLanguage() === "en" ? FOUNDATION_FILE_LABELS_EN[name] ?? zh : zh;
+}
 
 // --- current_state.md ---------------------------------------------------
 

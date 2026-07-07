@@ -217,6 +217,31 @@ inkos config show-models        # View current routing
 
 Agents without explicit overrides fall back to the global model.
 
+**Configuration troubleshooting**
+
+```bash
+inkos doctor
+```
+
+`doctor` prints the current effective config mode, where the service / model / API key come from, and runs an API connectivity check. Common modes:
+
+| Mode | Meaning |
+|------|---------|
+| `studio-project` | Studio runtime: only Studio/project settings and secrets are used |
+| `cli-project` | CLI runtime: Studio settings as the base, with env and CLI flags layered on top |
+| `legacy-env` | Legacy env mode: compatibility with old `.env`-only projects |
+
+If a service test fails, first check that the service, model, and protocol match each other. Google Gemini AI Studio API keys work with the Gemini OpenAI-compatible endpoint; InkOS automatically disables the OpenAI `store` parameter that Google does not support. MiniMax defaults to the official OpenAI-compatible `/v1/chat/completions` endpoint and prefers a working non-streaming transport, avoiding streams that return usage but no text; `MiniMax-M3*` disables returned thinking by default, while M2.x thinking cannot be disabled upstream.
+
+### LLM Configuration Notes
+
+- **Studio / CLI config isolation**: Studio always uses the service page settings and `.inkos/secrets.json`; the CLI, daemon, and deployment environments support env overrides and one-off command flags.
+- **Provider bank capability table**: built-in baseUrl, protocol, models, and compatibility policies for 15 services — Google Gemini, Moonshot, MiniMax, Zhipu (GLM), Bailian (Alibaba Cloud Model Studio), DeepSeek, SiliconFlow, Volcengine, Tencent Hunyuan, Baidu ERNIE (Wenxin), iFlytek Spark, OpenRouter, kkaiapi, Ollama, and CodingPlan.
+- **Model ownership validation**: mismatches like `--service google --model kimi-k2.5` fail immediately, so requests are never sent to the wrong provider.
+- **Google Gemini compatibility fix**: AI Studio API keys work directly with the Gemini OpenAI-compatible endpoint; InkOS automatically disables the OpenAI `store` parameter Google does not support.
+- **MiniMax transport probing**: MiniMax / MiniMax CodingPlan use the official OpenAI-compatible `/v1` entry and automatically pick a working non-streaming transport, working around streams that report usage but return an empty body.
+- **Legacy env compatibility**: the old `INKOS_LLM_BASE_URL + INKOS_LLM_MODEL + INKOS_LLM_API_KEY` combination still works for the CLI; without `INKOS_LLM_SERVICE`, InkOS tries to infer the service from the baseUrl.
+
 ### Current Interaction Entry Points
 
 **Studio Chat + CLI + TUI share the same execution surface**
@@ -377,7 +402,7 @@ Different agents can use different models and providers. Writer on Claude (stron
 
 ### Daemon Mode + Notifications
 
-`inkos up` starts an autonomous background loop that writes chapters on a schedule. The pipeline continues through handleable non-critical issues, pausing with reviewable results when human judgment is needed. Notifications via Telegram and Webhook (HMAC-SHA256 signing + event filtering). Logs to `inkos.log` (JSON Lines), `-q` for quiet mode.
+`inkos up` starts an autonomous background loop that writes chapters on a schedule. The pipeline continues through handleable non-critical issues, pausing with reviewable results when human judgment is needed. Notifications via Telegram, Feishu (Lark), WeCom (Enterprise WeChat), and Webhook (HMAC-SHA256 signing + event filtering). Logs to `inkos.log` (JSON Lines), `-q` for quiet mode.
 
 ### Local Model Compatibility
 
@@ -551,8 +576,11 @@ The first image is a local Studio screenshot. The other images are real local ou
 | `inkos eval [id]` | Generate a quality evaluation report (`--json`, chapter ranges) |
 | `inkos consolidate [id]` | Consolidate chapter summaries for long-book context control |
 | `inkos interact` | External-agent / CLI natural-language entry (`--json`, `--message`, `--book`) |
-| `inkos config set-global` | Set global LLM config (~/.inkos/.env) |
+| `inkos config set-global` | Set the global CLI / daemon / deployment LLM env config (`~/.inkos/.env`) |
+| `inkos config show-global` | Show the global config |
+| `inkos config set/show` | View or update project configuration |
 | `inkos config set-model <agent> <model>` | Per-agent model override (`--base-url`, `--provider`, `--api-key-env`) |
+| `inkos config remove-model <agent>` | Remove a per-agent model override (fall back to the default) |
 | `inkos config show-models` | Show current model routing |
 | `inkos doctor` | Diagnose setup issues (API connectivity test + provider compatibility hints) |
 | `inkos detect [id] [n]` | AIGC detection (`--all` for all chapters, `--stats` for statistics) |
@@ -568,12 +596,20 @@ The first image is a local Studio screenshot. The other images are real local ou
 
 `[id]` is auto-detected when the project has only one book. All commands support `--json` for structured output. `draft` / `write next` / `plan chapter` / `compose chapter` accept `--context` for steering, and `--words` overrides the target chapter size. `book create` supports `--brief <file>` to pass a creative brief — the Architect builds from your ideas instead of generating from scratch. `plan chapter` calls the LLM to create chapter intent; `compose chapter` does not require a live LLM, so you can inspect governed inputs before finishing API setup.
 
+The CLI also accepts one-off LLM override flags at runtime: `--service`, `--model`, `--api-key-env`, `--base-url`, `--api-format <chat|responses>`, `--stream`, `--no-stream`. For example:
+
+```bash
+inkos write next --service google --model gemini-2.5-flash
+inkos up --service moonshot --model kimi-k2.5 --api-key-env MOONSHOT_API_KEY
+```
+
 ## Roadmap
 
 - [x] ~~`packages/studio` Web UI workbench (Vite + React + Hono)~~ — shipped, run `inkos` or `inkos studio`
 - [x] ~~Interactive fiction / open worlds (branching choices + free actions + generated images)~~ — shipped in Studio Play
 - [ ] Partial chapter intervention (rewrite half a chapter + cascade truth file updates)
 - [ ] Custom agent plugin system
+- [ ] Platform-format export (Qidian, Fanqie, etc.)
 
 ## Contributing
 

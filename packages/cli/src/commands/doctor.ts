@@ -8,6 +8,15 @@ import {
   evaluateSqliteMemorySupport,
   inspectNodeRuntimePinFiles,
 } from "../runtime-requirements.js";
+import {
+  formatDoctorHintBaseUrl,
+  formatDoctorHintInvalidApiKey,
+  formatDoctorHintModelName,
+  formatDoctorHintOpenAiProbeExhausted,
+  formatDoctorHintQuota,
+  formatDoctorHintStreamRequirement,
+  resolveCliLanguage,
+} from "../localization.js";
 
 function buildDoctorProbePlans(
   preferredApiFormat: "chat" | "responses" | undefined,
@@ -97,6 +106,9 @@ export const doctorCommand = new Command("doctor")
   .action(async (opts: { repairNodeRuntime?: boolean }) => {
     const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
     const root = findProjectRoot();
+    // doctor is not scoped to a book, so the language comes from the environment
+    // (INKOS_LOCALE -> LC_ALL/LC_MESSAGES/LANG, default zh).
+    const language = resolveCliLanguage();
 
     if (opts.repairNodeRuntime) {
       const repair = await ensureNodeRuntimePinFiles(root);
@@ -331,11 +343,11 @@ export const doctorCommand = new Command("doctor")
           detail: connected ? detectedDetail : lastError.split("\n")[0]!,
         });
 
-        if (!connected && /\b(?:401|403|429)\b|unauthorized|forbidden|quota|额度|余额|配额/i.test(lastError)) {
+        if (!connected && /\b(?:401|403|429)\b|unauthorized|forbidden|quota|balance|insufficient|exceeded|额度|余额|配额/i.test(lastError)) {
           checks.push({
             name: "  Hint",
             ok: false,
-            detail: "检查 API Key 是否正确、模型是否可用，以及账号余额或配额是否足够。",
+            detail: formatDoctorHintQuota(language),
           });
         }
 
@@ -343,7 +355,7 @@ export const doctorCommand = new Command("doctor")
           checks.push({
             name: "  Hint",
             ok: false,
-            detail: "当前已自动尝试 chat/responses 与流式开关组合；如果仍失败，问题更可能在模型名、baseUrl 路径或服务商兼容性本身。",
+            detail: formatDoctorHintOpenAiProbeExhausted(language),
           });
         }
       }
@@ -352,14 +364,14 @@ export const doctorCommand = new Command("doctor")
       const hints: string[] = [];
 
       if (errMsg.includes("Connection error") || errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed")) {
-        hints.push("baseUrl 可能不正确，检查 INKOS_LLM_BASE_URL 是否包含完整路径（如 /v1）");
+        hints.push(formatDoctorHintBaseUrl(language));
       }
       if (errMsg.includes("400")) {
-        hints.push("检查提供方文档，确认该接口要求 stream=true、stream=false，还是根本不支持 stream");
-        hints.push("检查模型名称是否正确（INKOS_LLM_MODEL）");
+        hints.push(formatDoctorHintStreamRequirement(language));
+        hints.push(formatDoctorHintModelName(language));
       }
       if (errMsg.includes("401")) {
-        hints.push("API Key 无效，检查 INKOS_LLM_API_KEY");
+        hints.push(formatDoctorHintInvalidApiKey(language));
       }
 
       checks.push({

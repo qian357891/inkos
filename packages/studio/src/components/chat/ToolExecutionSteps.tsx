@@ -14,6 +14,7 @@ import {
   Check,
 } from "lucide-react";
 import { buildApiUrl } from "../../hooks/use-api";
+import { tr } from "../../lib/app-language";
 import { chatSelectors, useChatStore } from "../../store/chat";
 import { usePreferencesStore } from "../../store/preferences";
 
@@ -25,28 +26,28 @@ function ExecStatusBadge({ status }: { status: ToolExecution["status"] }) {
       return (
         <span className="inline-flex items-center gap-1 text-xs text-primary">
           <Loader2 size={12} className="animate-spin" />
-          <span>执行中</span>
+          <span>{tr("执行中", "Running")}</span>
         </span>
       );
     case "processing":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
           <Loader2 size={12} className="animate-spin" style={{ animationDuration: "2s" }} />
-          <span>处理结果</span>
+          <span>{tr("处理结果", "Processing result")}</span>
         </span>
       );
     case "completed":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
           <CheckCircle2 size={12} />
-          <span>已完成</span>
+          <span>{tr("已完成", "Completed")}</span>
         </span>
       );
     case "error":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-destructive">
           <XCircle size={12} />
-          <span>失败</span>
+          <span>{tr("失败", "Failed")}</span>
         </span>
       );
   }
@@ -65,7 +66,7 @@ function StageIcon({ status }: { status: PipelineStage["status"] }) {
 
 function formatProgress(progress: NonNullable<PipelineStage["progress"]>): string {
   const secs = Math.round(progress.elapsedMs / 1000);
-  const statusLabel = progress.status === "thinking" ? "思考中" : progress.status ?? "";
+  const statusLabel = progress.status === "thinking" ? tr("思考中", "Thinking") : progress.status ?? "";
   const chars = progress.totalChars > 0
     ? progress.chineseChars > 0 ? `${progress.totalChars}字` : `${progress.totalChars} chars`
     : "";
@@ -230,14 +231,14 @@ function ScriptStoryboardResultPreview({ exec, onOpenFilmStudio }: { exec: ToolE
     && details.kind !== "interactive_film_created"
   )) return null;
   const maybeRows: Array<readonly [string, string] | null> = [
-    details.specPath ? ["规格", details.specPath] : null,
-    details.storyGraphPath ? ["剧情图谱", details.storyGraphPath] : null,
-    details.storyTreePath ? ["剧情树", details.storyTreePath] : null,
-    details.flagsPath ? ["变量旗标", details.flagsPath] : null,
-    details.scriptPath ? ["剧本", details.scriptPath] : null,
-    details.storyboardPath ? ["分镜", details.storyboardPath] : null,
-    details.imagePromptsPath ? ["图像提示词", details.imagePromptsPath] : null,
-    details.assetsManifestPath ? ["图片资产", details.assetsManifestPath] : null,
+    details.specPath ? [tr("规格", "Spec"), details.specPath] : null,
+    details.storyGraphPath ? [tr("剧情图谱", "Story graph"), details.storyGraphPath] : null,
+    details.storyTreePath ? [tr("剧情树", "Story tree"), details.storyTreePath] : null,
+    details.flagsPath ? [tr("变量旗标", "Flags"), details.flagsPath] : null,
+    details.scriptPath ? [tr("剧本", "Script"), details.scriptPath] : null,
+    details.storyboardPath ? [tr("分镜", "Storyboard"), details.storyboardPath] : null,
+    details.imagePromptsPath ? [tr("图像提示词", "Image prompts"), details.imagePromptsPath] : null,
+    details.assetsManifestPath ? [tr("图片资产", "Image assets"), details.assetsManifestPath] : null,
   ];
   const rows = maybeRows.filter((row): row is readonly [string, string] => Boolean(row));
   if (rows.length === 0 && !(details.kind === "interactive_film_created" && details.projectId)) return null;
@@ -245,7 +246,11 @@ function ScriptStoryboardResultPreview({ exec, onOpenFilmStudio }: { exec: ToolE
     <div className="mx-3 mb-3 mt-1 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
       <div className="flex items-center justify-between gap-3">
         <div className="text-[16px] leading-6 font-semibold text-primary">
-          {details.kind === "script_created" ? "剧本已生成" : details.kind === "storyboard_created" ? "分镜已生成" : "互动影游已生成"}
+          {details.kind === "script_created"
+            ? tr("剧本已生成", "Script generated")
+            : details.kind === "storyboard_created"
+              ? tr("分镜已生成", "Storyboard generated")
+              : tr("互动影游已生成", "Interactive film generated")}
         </div>
         {details.kind === "interactive_film_created" && details.projectId && onOpenFilmStudio && (
           <button
@@ -254,7 +259,7 @@ function ScriptStoryboardResultPreview({ exec, onOpenFilmStudio }: { exec: ToolE
             onClick={() => onOpenFilmStudio(details.projectId!)}
             className="shrink-0 rounded-lg bg-primary px-3 py-1 text-[13px] font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
-            打开创作向导 →
+            {tr("打开创作向导 →", "Open creation wizard →")}
           </button>
         )}
       </div>
@@ -268,10 +273,10 @@ function ScriptStoryboardResultPreview({ exec, onOpenFilmStudio }: { exec: ToolE
               className="group flex w-full items-start justify-between gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left transition hover:border-primary/25 hover:bg-background/65"
             >
               <span className="min-w-0 text-[13px] leading-5 text-muted-foreground break-all">
-                <span className="font-medium text-foreground">{label}：</span>{path}
+                <span className="font-medium text-foreground">{label}{tr("：", ": ")}</span>{path}
               </span>
               <span className="mt-0.5 shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary opacity-80 transition group-hover:opacity-100">
-                查看
+                {tr("查看", "View")}
               </span>
             </button>
           ))}
@@ -290,14 +295,14 @@ function ShortFictionResultPreview({ exec }: { exec: ToolExecution }) {
     if (!coverError) return null;
     return (
       <div className="mx-3 mb-3 mt-1 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-        封面未生成：{coverError}
+        {tr("封面未生成：", "Cover not generated: ")}{coverError}
       </div>
     );
   }
 
   const coverUrl = buildApiUrl(`/project/files/${encodeProjectPath(coverPath)}`);
   if (!coverUrl) return null;
-  const title = details?.title ?? details?.storyId ?? "短篇封面";
+  const title = details?.title ?? details?.storyId ?? tr("短篇封面", "Short fiction cover");
 
   return (
     <div className="mx-3 mb-3 mt-1 overflow-hidden rounded-xl border border-border/40 bg-background/70">
@@ -420,13 +425,13 @@ function PlaySceneImagePreview({ details }: { details: PlayToolDetails }) {
     <div className="mt-3 overflow-hidden rounded-xl border border-border/40 bg-background/80">
       <img
         src={readyUrl}
-        alt="本幕配图"
+        alt={tr("本幕配图", "Scene illustration")}
         className="block max-h-[420px] w-full object-contain bg-muted/20"
         loading="lazy"
       />
       {details.turn != null && (
         <div className="border-t border-border/40 px-3 py-2.5 text-[14px] leading-6 text-muted-foreground">
-          第 {Math.trunc(details.turn)} 幕配图
+          {tr(`第 ${Math.trunc(details.turn)} 幕配图`, `Scene ${Math.trunc(details.turn)} illustration`)}
         </div>
       )}
     </div>
@@ -477,9 +482,9 @@ export function getProposedActionContractRows(details: ProposedActionDetails): R
   if (details.action !== "play_start" || !playStart) return [];
   const rows: Array<{ label: string; value: string }> = [];
   const worldContract = playStart.worldContract?.trim();
-  if (worldContract) rows.push({ label: "世界契约", value: worldContract });
+  if (worldContract) rows.push({ label: tr("世界契约", "World contract"), value: worldContract });
   const visualContract = playStart.visualContract?.trim();
-  if (visualContract) rows.push({ label: "视觉契约", value: visualContract });
+  if (visualContract) rows.push({ label: tr("视觉契约", "Visual contract"), value: visualContract });
   return rows;
 }
 
@@ -506,7 +511,7 @@ function ProposedActionPreview({
   const contractRows = getProposedActionContractRows(details);
   return (
     <div className="mx-3 mb-3 mt-1 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3.5">
-      <div className="text-[17px] leading-6 font-semibold text-foreground">{details.title ?? "确认执行"}</div>
+      <div className="text-[17px] leading-6 font-semibold text-foreground">{details.title ?? tr("确认执行", "Confirm action")}</div>
       {details.summary && (
         <div className="mt-1.5 whitespace-pre-wrap break-words text-[15px] leading-7 text-muted-foreground">{details.summary}</div>
       )}
@@ -526,10 +531,10 @@ function ProposedActionPreview({
       {resolution === "confirmed" ? (
         <div className="mt-3 flex items-center gap-1.5 text-[15px] leading-6 font-medium text-primary">
           <Check size={15} className="shrink-0" />
-          {details.targetRoute ? "已打开" : "已执行"}
+          {details.targetRoute ? tr("已打开", "Opened") : tr("已执行", "Executed")}
         </div>
       ) : resolution === "rejected" ? (
-        <div className="mt-3 text-[15px] leading-6 font-medium text-muted-foreground">已取消</div>
+        <div className="mt-3 text-[15px] leading-6 font-medium text-muted-foreground">{tr("已取消", "Cancelled")}</div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
           <button
@@ -539,7 +544,7 @@ function ProposedActionPreview({
             disabled={!onProposedAction || streaming || locked}
             className="rounded-lg bg-primary px-3.5 py-2 text-[15px] leading-6 font-medium text-primary-foreground disabled:opacity-50"
           >
-            {streaming ? "执行中…" : details.targetRoute ? "打开入口" : "继续执行"}
+            {streaming ? tr("执行中…", "Running…") : details.targetRoute ? tr("打开入口", "Open entry") : tr("继续执行", "Continue")}
           </button>
           <button
             type="button"
@@ -547,7 +552,7 @@ function ProposedActionPreview({
             disabled={!onRejectProposedAction || streaming || locked}
             className="rounded-lg border border-border/60 bg-background/80 px-3.5 py-2 text-[15px] leading-6 font-medium text-muted-foreground disabled:opacity-50"
           >
-            取消
+            {tr("取消", "Cancel")}
           </button>
         </div>
       )}
@@ -560,12 +565,12 @@ function PlayResultPreview({ exec }: { exec: ToolExecution }) {
   const details = getPlayToolDetails(exec);
   if (!details?.sceneText) return null;
   const label = details.kind === "play_world_started"
-    ? "互动世界已启动"
+    ? tr("互动世界已启动", "Interactive world started")
     : details.kind === "play_turn_revised"
-      ? "互动回合已重做"
+      ? tr("互动回合已重做", "Play turn redone")
       : details.kind === "play_variant_restored"
-        ? "已切换互动回合版本"
-        : "互动世界已推进";
+        ? tr("已切换互动回合版本", "Switched play turn variant")
+        : tr("互动世界已推进", "Interactive world advanced");
   return (
     <div className="mx-3 mb-3 mt-1 rounded-xl border border-primary/20 bg-primary/5 px-3 py-3">
       <div className="mb-2 text-[16px] leading-6 font-semibold text-primary">
@@ -582,16 +587,18 @@ function PlayEditPreview({ exec }: { exec: ToolExecution }) {
   const details = getPlayEditDetails(exec);
   if (!details) return null;
   const changes = [
-    details.updatedWorldContract ? "世界契约" : "",
-    details.updatedVisualContract ? "视觉契约" : "",
-    details.updatedPremise ? "世界前提" : "",
-    details.updatedEntities && details.updatedEntities > 0 ? `${details.updatedEntities} 张卡片` : "",
+    details.updatedWorldContract ? tr("世界契约", "World contract") : "",
+    details.updatedVisualContract ? tr("视觉契约", "Visual contract") : "",
+    details.updatedPremise ? tr("世界前提", "World premise") : "",
+    details.updatedEntities && details.updatedEntities > 0
+      ? tr(`${details.updatedEntities} 张卡片`, `${details.updatedEntities} cards`)
+      : "",
   ].filter(Boolean);
   return (
     <div className="mx-3 mb-3 mt-1 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
-      <div className="text-[16px] leading-6 font-semibold text-primary">互动世界设定已更新</div>
+      <div className="text-[16px] leading-6 font-semibold text-primary">{tr("互动世界设定已更新", "Interactive world settings updated")}</div>
       <div className="mt-1 text-xs leading-5 text-muted-foreground">
-        {changes.length > 0 ? changes.join(" · ") : "已写入当前世界。"}
+        {changes.length > 0 ? changes.join(" · ") : tr("已写入当前世界。", "Written to the current world.")}
       </div>
     </div>
   );
@@ -641,7 +648,7 @@ export function PipelineResultDetails({ result, defaultOpen }: { result: string;
       className="mx-3 mb-3 mt-1 rounded-lg border border-border/40 bg-background/60 px-2.5 py-2 text-xs"
     >
       <summary className="cursor-pointer select-none font-medium text-muted-foreground hover:text-foreground">
-        查看操作结果
+        {tr("查看操作结果", "View result")}
       </summary>
       <div className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words leading-5 text-foreground">
         {result}
@@ -809,7 +816,7 @@ function UtilityToolsGroup({ execs }: { execs: ToolExecution[] }) {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer text-xs text-muted-foreground">
         <Wrench size={12} />
-        <span>{execs.length} 个文件操作</span>
+        <span>{tr(`${execs.length} 个文件操作`, `${execs.length} file operation${execs.length === 1 ? "" : "s"}`)}</span>
         {allDone && !hasError && <CheckCircle2 size={10} className="text-green-600 dark:text-green-400" />}
         {hasError && <XCircle size={10} className="text-destructive" />}
         {!allDone && <Loader2 size={10} className="animate-spin text-primary" />}

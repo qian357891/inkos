@@ -1,20 +1,28 @@
-export const SLASH_COMMANDS = [
-  "/new 输入你的想法",
-  "/write",
-  "/books",
-  "/rewrite <n>",
-  "/focus <text>",
-  "/truth <file> <content>",
-  "/rename <from> => <to>",
-  "/replace <n> <from> => <to>",
-  "/export [txt|md|epub]",
-  "/help",
-  "/status",
-  "/clear",
-  "/depth <light|normal|deep>",
-  "/quit",
-  "/exit",
-] as const;
+import type { CliLanguage } from "../localization.js";
+
+const SLASH_COMMAND_VARIANTS: ReadonlyArray<{ zh: string; en: string }> = [
+  { zh: "/new 输入你的想法", en: "/new describe your idea" },
+  { zh: "/write", en: "/write" },
+  { zh: "/books", en: "/books" },
+  { zh: "/rewrite <n>", en: "/rewrite <n>" },
+  { zh: "/focus <text>", en: "/focus <text>" },
+  { zh: "/truth <file> <content>", en: "/truth <file> <content>" },
+  { zh: "/rename <from> => <to>", en: "/rename <from> => <to>" },
+  { zh: "/replace <n> <from> => <to>", en: "/replace <n> <from> => <to>" },
+  { zh: "/export [txt|md|epub]", en: "/export [txt|md|epub]" },
+  { zh: "/help", en: "/help" },
+  { zh: "/status", en: "/status" },
+  { zh: "/clear", en: "/clear" },
+  { zh: "/depth <light|normal|deep>", en: "/depth <light|normal|deep>" },
+  { zh: "/quit", en: "/quit" },
+  { zh: "/exit", en: "/exit" },
+];
+
+export function buildSlashCommands(language: CliLanguage = "zh"): readonly string[] {
+  return SLASH_COMMAND_VARIANTS.map((variant) => (language === "en" ? variant.en : variant.zh));
+}
+
+export const SLASH_COMMANDS = buildSlashCommands("zh");
 
 export type SlashNavigationDirection = "up" | "down";
 

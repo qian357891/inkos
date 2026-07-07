@@ -8,33 +8,36 @@ import type {
   ToolExecution,
 } from "../../types";
 import { localizeKnownRuntimeMessage } from "../../../../lib/error-copy";
+import { tr } from "../../../../lib/app-language";
 
 const NULL_BOOK_KEY = "__null__";
 
-const AGENT_LABELS: Record<string, string> = {
-  architect: "建书",
-  writer: "写作",
-  auditor: "审计",
-  reviser: "修订",
-  exporter: "导出",
+// [zh, en] tuples resolved through tr() at call time so labels follow the
+// current app language instead of the language active at module load.
+const AGENT_LABELS: Record<string, readonly [string, string]> = {
+  architect: ["建书", "Create book"],
+  writer: ["写作", "Write"],
+  auditor: ["审计", "Audit"],
+  reviser: ["修订", "Revise"],
+  exporter: ["导出", "Export"],
 };
 
-const TOOL_LABELS: Record<string, string> = {
-  read: "读取文件",
-  edit: "编辑文件",
-  grep: "搜索",
-  ls: "列目录",
-  context_compression: "整理上下文",
-  propose_action: "确认动作",
-  short_fiction_run: "短篇生产",
-  generate_cover: "生成封面",
-  script_create: "剧本创作",
-  storyboard_create: "分镜创作",
-  interactive_film_create: "互动影游",
-  play_edit: "编辑互动世界",
-  play_start: "启动互动世界",
-  play_revise: "重做互动回合",
-  play_step: "推进互动世界",
+const TOOL_LABELS: Record<string, readonly [string, string]> = {
+  read: ["读取文件", "Read file"],
+  edit: ["编辑文件", "Edit file"],
+  grep: ["搜索", "Search"],
+  ls: ["列目录", "List directory"],
+  context_compression: ["整理上下文", "Organize context"],
+  propose_action: ["确认动作", "Confirm action"],
+  short_fiction_run: ["短篇生产", "Short fiction run"],
+  generate_cover: ["生成封面", "Generate cover"],
+  script_create: ["剧本创作", "Create script"],
+  storyboard_create: ["分镜创作", "Create storyboard"],
+  interactive_film_create: ["互动影游", "Interactive film"],
+  play_edit: ["编辑互动世界", "Edit interactive world"],
+  play_start: ["启动互动世界", "Start interactive world"],
+  play_revise: ["重做互动回合", "Redo play turn"],
+  play_step: ["推进互动世界", "Advance interactive world"],
 };
 
 export function bookKey(bookId: string | null | undefined): string {
@@ -47,8 +50,12 @@ export function extractErrorMessage(error: string | { code?: string; message?: s
 }
 
 export function resolveToolLabel(tool: string, agent?: string): string {
-  if (tool === "sub_agent" && agent) return AGENT_LABELS[agent] ?? agent;
-  return TOOL_LABELS[tool] ?? tool;
+  if (tool === "sub_agent" && agent) {
+    const label = AGENT_LABELS[agent];
+    return label ? tr(label[0], label[1]) : agent;
+  }
+  const label = TOOL_LABELS[tool];
+  return label ? tr(label[0], label[1]) : tool;
 }
 
 export function summarizeResult(result: unknown): string {

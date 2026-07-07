@@ -10,6 +10,7 @@ import type {
   SessionSummary,
 } from "../../types";
 import { fetchJson } from "../../../../hooks/use-api";
+import { tr } from "../../../../lib/app-language";
 import { attachSessionStreamListeners } from "./stream-events";
 import {
   bookKey,
@@ -62,7 +63,8 @@ function formatAttachmentSize(size: number): string {
 
 function formatUserMessageForDisplay(text: string, attachments: ReadonlyArray<ChatAttachmentPayload>): string {
   if (attachments.length === 0) return text;
-  const lines = text ? [text, "", "附件："] : ["附件："];
+  const heading = tr("附件：", "Attachments:");
+  const lines = text ? [text, "", heading] : [heading];
   for (const attachment of attachments) {
     lines.push(`- ${attachment.filename} (${attachment.mediaType || "application/octet-stream"}, ${formatAttachmentSize(attachment.size)})`);
   }
@@ -456,7 +458,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     const attachments = options?.attachments ?? [];
     const session = get().sessions[sessionId];
     if ((!trimmed && attachments.length === 0) || !session || session.isStreaming) return;
-    const userInstruction = trimmed || "请阅读我上传的文件。";
+    const userInstruction = trimmed || tr("请阅读我上传的文件。", "Please read the files I uploaded.");
     const activeBookId = options?.activeBookId ?? session.bookId ?? undefined;
     const sessionKind: ChatSessionKind = options?.sessionKind
       ?? session.sessionKind
@@ -466,7 +468,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
     if (!get().selectedModel) {
       get().addUserMessage(sessionId, formatUserMessageForDisplay(userInstruction, attachments));
-      get().addErrorMessage(sessionId, "请先选择一个模型");
+      get().addErrorMessage(sessionId, tr("请先选择一个模型", "Select a model first"));
       return;
     }
 
@@ -635,7 +637,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         if (hasStream) {
           get().finalizeStream(sessionId, streamTs, "", toolCall);
         } else {
-          const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
+          const emptyMessage = tr(
+            "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。",
+            "The model returned no text. Check the protocol type (chat/responses), the streaming toggle, or upstream service compatibility.",
+          );
           get().addErrorMessage(sessionId, emptyMessage);
         }
       }
