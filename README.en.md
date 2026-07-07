@@ -28,7 +28,7 @@
 
 InkOS is a local AI creation system for long-form novels, standalone short fiction, scripts, storyboards, fan fiction, spinoffs, style imitation, continuation, interactive film projects, and interactive worlds. Studio Chat, CLI, and TUI share the same action surface, so you can discuss ideas, confirm heavy actions, generate work, preview artifacts, research external facts, and edit persistent project files from one place.
 
-> 💡 **Give your writing agent a professional data layer first** — writing fiction isn't just about the model; what's usually missing is the source material. Pair InkOS with [**火花数据API (huohuaapi)**](https://huohuaapi.com/): a pay-per-call novel / web-fiction creation data API. Before the agent writes, it can pull sourced material — novel text, chapter structure, character profiles, writing style, and craft methods — instead of relying on prompts alone to fake a "plot outline".
+> 💡 **One key for global frontier models** — pair InkOS with [**keaiapi**](https://keaiapi.com/): an OpenAI-compatible gateway for Claude, GPT, Gemini, DeepSeek, Kimi, Qwen, GLM, and image models. Add it as a custom service with base URL `https://api.keaiapi.com/v1`, then switch models in Studio without juggling multiple provider accounts.
 
 ## v1.6.2 Chat Attachments, Material Library, and Editable Prompts
 
@@ -75,7 +75,7 @@ This release continues the v1.5 direction: heavy actions are confirmable, comple
 
 **Runtime skills and research** — add reusable professional skills under `.inkos/skills/`, force them with `@skill-id`, or ask for web research to generate a sourced Markdown report.
 
-**Model setup** — Studio includes provider settings, model routing, cover-service settings, [kkaiapi](https://en.kkaiapi.com/) / OpenRouter aggregator entries, and custom OpenAI-compatible endpoints.
+**Model setup** — Studio includes provider settings, model routing, cover-service settings, [keaiapi](https://keaiapi.com/) / OpenRouter aggregator entries, and custom OpenAI-compatible endpoints.
 
 <p align="center">
   <img src="assets/play-item-warcraft.png" width="420" alt="InkOS Play item image example">
@@ -158,7 +158,7 @@ inkos
 
 Open Studio, then go to **Model Settings**:
 
-1. Choose a service such as Google Gemini, Moonshot, MiniMax, DeepSeek, kkaiapi, OpenRouter, or a custom endpoint.
+1. Choose a service such as Google Gemini, Moonshot, MiniMax, DeepSeek, keaiapi, OpenRouter, or a custom endpoint.
 2. Paste the API key and test the connection.
 3. Pick an available model and save.
 4. Return to Studio Chat or your book page.
@@ -236,7 +236,7 @@ If a service test fails, first check that the service, model, and protocol match
 ### LLM Configuration Notes
 
 - **Studio / CLI config isolation**: Studio always uses the service page settings and `.inkos/secrets.json`; the CLI, daemon, and deployment environments support env overrides and one-off command flags.
-- **Provider bank capability table**: built-in baseUrl, protocol, models, and compatibility policies for 15 services — Google Gemini, Moonshot, MiniMax, Zhipu (GLM), Bailian (Alibaba Cloud Model Studio), DeepSeek, SiliconFlow, Volcengine, Tencent Hunyuan, Baidu ERNIE (Wenxin), iFlytek Spark, OpenRouter, kkaiapi, Ollama, and CodingPlan.
+- **Provider bank capability table**: built-in baseUrl, protocol, models, and compatibility policies for 15 services — Google Gemini, Moonshot, MiniMax, Zhipu (GLM), Bailian (Alibaba Cloud Model Studio), DeepSeek, SiliconFlow, Volcengine, Tencent Hunyuan, Baidu ERNIE (Wenxin), iFlytek Spark, OpenRouter, keaiapi, Ollama, and CodingPlan.
 - **Model ownership validation**: mismatches like `--service google --model kimi-k2.5` fail immediately, so requests are never sent to the wrong provider.
 - **Google Gemini compatibility fix**: AI Studio API keys work directly with the Gemini OpenAI-compatible endpoint; InkOS automatically disables the OpenAI `store` parameter Google does not support.
 - **MiniMax transport probing**: MiniMax / MiniMax CodingPlan use the official OpenAI-compatible `/v1` entry and automatically pick a working non-streaming transport, working around streams that report usage but return an empty body.
