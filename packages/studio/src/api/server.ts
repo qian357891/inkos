@@ -101,6 +101,7 @@ import {
   analyzePathDistribution,
   generateNodeImage,
   defaultNodeImageDeps,
+  StreamingNarrativeSplitter,
   type NodeImageDeps,
   type ResolvedModel,
   type PipelineConfig,
@@ -4428,6 +4429,19 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
 
       // Run pi-agent session
       const collectedToolExecs: CollectedToolExec[] = [];
+      // Per-message narrative splitter for reasoning-capable models
+      // (MiniMax-M3, DeepSeek-R1, kimi-k2-thinking) that inline their
+      // chain-of-thought into the visible content stream. Keyed by
+      // AssistantMessage timestamp so multiple AssistantMessages in
+      // tool-call loops don't share state. See StreamingNarrativeSplitter
+      // for the routing rules.
+      const narrativeSplitters = new Map<number, StreamingNarrativeSplitter>();
+      // Track which message timestamps have already broadcast a
+      // `thinking:start` so we only open a thinking part when the
+      // splitter actually has narration to route. Without this guard
+      // every text_delta creates an empty thinking panel that opens
+      // to no content.
+      const thinkingStarted = new Set<number>();
       const result = await runAgentSession(
         {
           model,
@@ -4455,14 +4469,148 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
             if (event.type === "message_update") {
               const ame = event.assistantMessageEvent;
               if (ame.type === "text_delta") {
-                broadcast("draft:delta", { sessionId: streamSessionId, text: ame.delta });
+                // Reasoning-capable models (MiniMax-M3, DeepSeek-R1, etc.)
+                // sometimes narrate their chain-of-thought inside the
+                // visible content stream instead of using a separate
+                // reasoning channel. We split each completed paragraph
+                // through StreamingNarrativeSplitter so narration
+                // paragraphs ride on `thinking:delta` (collapsible
+                // `<Reasoning>` panel in Studio) and the real reply
+                // rides on `draft:delta` (main bubble).
+                //
+                // We only broadcast `thinking:start` immediately before
+                // the first narration paragraph is emitted. Emitting it
+                // earlier (on every text_delta) would create an empty
+                // thinking panel that opens to no content.
+                const messageTimestamp =
+                  (ame as { partial?: { timestamp?: number } }).partial?.timestamp
+                  ?? ame.contentIndex
+                  ?? 0;
+                let splitter = narrativeSplitters.get(messageTimestamp);
+                if (!splitter) {
+                  splitter = new StreamingNarrativeSplitter(surfaceLanguage);
+                  narrativeSplitters.set(messageTimestamp, splitter);
+                }
+                const routed = splitter.acceptTextDelta(ame.delta);
+                for (const text of routed.textDeltas) {
+                  broadcast("draft:delta", { sessionId: streamSessionId, text });
+                }
+                if (routed.thinkingDeltas.length > 0) {
+                  if (!thinkingStarted.has(messageTimestamp)) {
+                    broadcast("thinking:start", { sessionId: streamSessionId });
+                    thinkingStarted.add(messageTimestamp);
+                  }
+                  for (const thinking of routed.thinkingDeltas) {
+                    broadcast("thinking:delta", { sessionId: streamSessionId, text: thinking });
+                  }
+                }
+              } else if (ame.type === "text_end") {
+                // A text-block finished; flush any residual buffered
+                // characters that never reached a paragraph boundary.
+                const messageTimestamp =
+                  (ame as { partial?: { timestamp?: number } }).partial?.timestamp
+                  ?? ame.contentIndex
+                  ?? 0;
+                const splitter = narrativeSplitters.get(messageTimestamp);
+                if (splitter) {
+                  const routed = splitter.flush();
+                  for (const text of routed.textDeltas) {
+                    broadcast("draft:delta", { sessionId: streamSessionId, text });
+                  }
+                  if (routed.thinkingDeltas.length > 0) {
+                    if (!thinkingStarted.has(messageTimestamp)) {
+                      broadcast("thinking:start", { sessionId: streamSessionId });
+                      thinkingStarted.add(messageTimestamp);
+                    }
+                    for (const thinking of routed.thinkingDeltas) {
+                      broadcast("thinking:delta", { sessionId: streamSessionId, text: thinking });
+                    }
+                  }
+                }
               } else if (ame.type === "thinking_delta") {
+                // Native pi-agent reasoning channel (e.g. MiniMax-M3 emits
+                // reasoning_content separately and pi-agent surfaces it
+                // here). We still key start/end by messageTimestamp so
+                // a native thinking:start that we already routed through
+                // the splitter (or vice versa) doesn't open a second
+                // empty thinking panel.
+                const messageTimestamp =
+                  (ame as { partial?: { timestamp?: number } }).partial?.timestamp
+                  ?? ame.contentIndex
+                  ?? 0;
+                if (!thinkingStarted.has(messageTimestamp)) {
+                  broadcast("thinking:start", { sessionId: streamSessionId });
+                  thinkingStarted.add(messageTimestamp);
+                }
                 broadcast("thinking:delta", { sessionId: streamSessionId, text: (ame as any).delta });
               } else if (ame.type === "thinking_start") {
-                broadcast("thinking:start", { sessionId: streamSessionId });
+                const messageTimestamp =
+                  (ame as { partial?: { timestamp?: number } }).partial?.timestamp
+                  ?? ame.contentIndex
+                  ?? 0;
+                if (!thinkingStarted.has(messageTimestamp)) {
+                  broadcast("thinking:start", { sessionId: streamSessionId });
+                  thinkingStarted.add(messageTimestamp);
+                }
               } else if (ame.type === "thinking_end") {
-                broadcast("thinking:end", { sessionId: streamSessionId });
+                const messageTimestamp =
+                  (ame as { partial?: { timestamp?: number } }).partial?.timestamp
+                  ?? ame.contentIndex
+                  ?? 0;
+                if (thinkingStarted.has(messageTimestamp)) {
+                  broadcast("thinking:end", { sessionId: streamSessionId });
+                  thinkingStarted.delete(messageTimestamp);
+                }
+              } else if (ame.type === "done" || ame.type === "error") {
+                // AssistantMessage ended (whole-stream done). Flush any
+                // splitter state for every active message so the bubble
+                // and the thinking panel both close cleanly.
+                for (const [messageTimestamp, splitter] of narrativeSplitters) {
+                  const routed = splitter.flush();
+                  for (const text of routed.textDeltas) {
+                    broadcast("draft:delta", { sessionId: streamSessionId, text });
+                  }
+                  if (routed.thinkingDeltas.length > 0) {
+                    if (!thinkingStarted.has(messageTimestamp)) {
+                      broadcast("thinking:start", { sessionId: streamSessionId });
+                      thinkingStarted.add(messageTimestamp);
+                    }
+                    for (const thinking of routed.thinkingDeltas) {
+                      broadcast("thinking:delta", { sessionId: streamSessionId, text: thinking });
+                    }
+                  }
+                  if (thinkingStarted.has(messageTimestamp)) {
+                    broadcast("thinking:end", { sessionId: streamSessionId });
+                    thinkingStarted.delete(messageTimestamp);
+                  }
+                }
+                narrativeSplitters.clear();
               }
+            } else if (event.type === "message_end") {
+              // Belt-and-suspenders: the runtime emits message_end right
+              // after the AssistantMessage's `done`/`error` event. Use
+              // this as the authoritative flush point so partial chunks
+              // never leak across subsequent turns.
+              for (const [messageTimestamp, splitter] of narrativeSplitters) {
+                const routed = splitter.flush();
+                for (const text of routed.textDeltas) {
+                  broadcast("draft:delta", { sessionId: streamSessionId, text });
+                }
+                if (routed.thinkingDeltas.length > 0) {
+                  if (!thinkingStarted.has(messageTimestamp)) {
+                    broadcast("thinking:start", { sessionId: streamSessionId });
+                    thinkingStarted.add(messageTimestamp);
+                  }
+                  for (const thinking of routed.thinkingDeltas) {
+                    broadcast("thinking:delta", { sessionId: streamSessionId, text: thinking });
+                  }
+                }
+                if (thinkingStarted.has(messageTimestamp)) {
+                  broadcast("thinking:end", { sessionId: streamSessionId });
+                  thinkingStarted.delete(messageTimestamp);
+                }
+              }
+              narrativeSplitters.clear();
             }
             if (event.type === "tool_execution_start") {
               const args = event.args as Record<string, unknown> | undefined;

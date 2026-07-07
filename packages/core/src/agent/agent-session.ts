@@ -66,6 +66,7 @@ import { createSkillRegistry, loadConfiguredCapabilitySkills } from "../skills/i
 import { assertSafeBookId } from "../utils/book-id.js";
 import { PlayStore } from "../play/play-store.js";
 import { isLlmStubEnabled, stubAgentStream } from "./llm-stub.js";
+import { stripReasoning } from "../utils/strip-reasoning.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -503,6 +504,17 @@ function extractTextFromAssistant(msg: AssistantMessage): string {
     .join("");
 }
 
+/**
+ * Extract thinking/reasoning text from an AssistantMessage's content array.
+ * Concatenates the contents of any `thinking` / `redacted_thinking` blocks.
+ */
+function extractThinkingFromAssistant(msg: AssistantMessage): string {
+  return msg.content
+    .filter((c: any) => c?.type === "thinking")
+    .map((c: any) => (typeof c.thinking === "string" ? c.thinking : ""))
+    .join("");
+}
+
 function looksLikeUnsavedChapterProse(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 800) return false;
@@ -664,13 +676,182 @@ function convertAgentMessagesForModel(messages: AgentMessage[], model: Model<Api
 }
 
 /**
- * Extract thinking/reasoning text from an AssistantMessage's content array.
+ * Reasoning-capable models (MiniMax-M2.7/M3, DeepSeek-R1, kimi-k2-thinking, etc.)
+ * sometimes do NOT have a separate reasoning channel — instead they narrate their
+ * chain-of-thought as ordinary visible text. The user sees paragraphs like
+ *
+ *   The user wants to add a setting: …
+ *   Let me check the current truth files. Looking at the story_frame.md, …
+ *   So this setting already exists. So I should:
+ *   Acknowledge that …
+ *   Check if it …
+ *
+ * which is internal monologue, not the answer. The dedicated
+ * `reasoning_content` / thinking channel is empty in that case, so the
+ * provider layer's `stripReasoning` does nothing.
+ *
+ * `sanitizeVisibleReply` is a defence-in-depth post-processor:
+ *
+ *   1. `stripReasoning` removes any inline `<thinking>` / `<reasoning>` blocks
+ *      that MiniMax occasionally emits via the text channel.
+ *   2. Paragraph-level narration scrubbing removes English-language "thinking
+ *      aloud" lines that belong to a Chinese (or zh-pinned) session. The
+ *      detection covers the obvious chain-of-thought openers used by o1-style
+ *      models. EN sessions keep their natural structure (a Chinese reply
+ *      will not be wrongly scrubbed).
+ *   3. If scrubbing leaves the reply empty AND original text was substantial
+ *      narration, we return a synthetic Chinese explanation so the user
+ *      always sees something actionable rather than a blank bubble. The
+ *      caller can still inspect whether the bubble is synthetic via the
+ *      length / content compared to the original.
+ *
+ * Heuristic, not perfect. The real fix is the system prompt — but if MiniMax
+ * still leaks thinking-aloud on a given turn, this strips it before it ever
+ * reaches Studio Chat.
  */
-function extractThinkingFromAssistant(msg: AssistantMessage): string {
-  return msg.content
-    .filter((c: any) => c.type === "thinking")
-    .map((c: any) => c.thinking ?? "")
-    .join("");
+function sanitizeVisibleReply(text: string, language: string): string {
+  if (!text) return text;
+  const stripped = stripReasoning(text);
+  if (language !== "zh" && language !== "zh-CN" && language !== "zh-Hans") return stripped;
+
+  const paragraphs = stripped.split(/\n{2,}/);
+  if (paragraphs.length <= 1) {
+    // Single paragraph: still scrub if it looks like narration with a
+    // Chinese answer embedded further down.
+    const narrSplit = splitNarrationFromAnswer(stripped);
+    if (narrSplit.answer.trim()) return narrSplit.answer.trim();
+    if (narrSplit.dropped.trim()) return narrationOnlyFallback(language);
+    return stripped.trim();
+  }
+
+  const kept: string[] = [];
+  let droppedNarration = false;
+  let droppedChars = 0;
+  for (const paragraph of paragraphs) {
+    const trimmed = paragraph.trim();
+    if (!trimmed) continue;
+    if (isThinkingAloudParagraph(trimmed)) {
+      droppedNarration = true;
+      droppedChars += trimmed.length;
+      continue;
+    }
+    kept.push(paragraph);
+  }
+
+  const remaining = kept.join("\n\n").trim();
+  // If we dropped substantial narration AND the kept portion is essentially
+  // empty (less than 32 chars after a heavy-leak drop), refuse to send the
+  // empty result; substitute a synthetic Chinese explanation so the user
+  // is not silently shown nothing for the turn. We tolerate small remnants
+  // (e.g. a stray "其四，死亡与伤害兑现..." quote) and pass them through.
+  if (droppedNarration && droppedChars > 80 && remaining.length < 32) {
+    return narrationOnlyFallback(language);
+  }
+  return remaining;
+}
+
+function narrationOnlyFallback(language: string): string {
+  if (language !== "zh" && language !== "zh-CN" && language !== "zh-Hans") {
+    return "The model produced only internal thinking-aloud text and no user-facing reply. Please re-send with a clearer instruction, switch to a non-reasoning model, or break the task into smaller steps.";
+  }
+  return "这一轮模型只输出了内部思考串，没有可见回复。可能是 reasoning 模型把思考当成正文输出了。请：换非 reasoning 模型重试、把任务拆小再发一次、或在 system prompt 里显式禁止 thinking aloud。";
+}
+
+/**
+ * Recognise English-language chain-of-thought narration the model produces
+ * as ordinary visible text. Each pattern is anchored at the start of the
+ * paragraph (after trimming) so legitimate prose that happens to contain
+ * these phrases mid-sentence is not wrongly caught.
+ *
+ * The patterns are organised by the kind of leakage they catch:
+ *
+ *   - Subject-of-thought openers ("The user wants …", "The user is asking …")
+ *   - Self-direction verbs ("Let me …", "I need to …", "I should …", "I will …")
+ *   - Transitional filler ("So this …", "So I should …", "First, I …", "Now I …")
+ *   - Source-checking meta ("Looking at <file>", "Reading <file>", "Yes, in …")
+ *   - Self-planning bullets ("Acknowledge that …", "Check if …", "Propagate to …")
+ *
+ * Note that we err on the side of catching prose in zh mode: the cost of
+ * dropping a legitimate paragraph is much lower than the cost of
+ * surfacing thinking-aloud narration to the user as if it were the reply.
+ */
+function isThinkingAloudParagraph(paragraph: string): boolean {
+  if (!paragraph) return false;
+  const head = paragraph.slice(0, 240);
+  const narrationOpeners: RegExp[] = [
+    // Subject-of-thought openers
+    /^The user (?:wants|is asking|asked|asked me|requests|has asked|pastes|pasted|wants me to)/i,
+    /^User (?:wants|asked|requests|is asking)/i,
+    // Let me …
+    /^Let me (?:check|read|verify|look|see|examine|inspect|review|find|search|trace|cross|confirm)/i,
+    /^Let me (?:think|consider|figure|figure out|recall|re-?read|re-examine|re-check|start|begin|take|note|review|analyze|break down|map)/i,
+    /^Let me (?:write|draft|compose|produce|generate|create|make|formulate|prepare)/i,
+    // I need to / I should / I will / I must
+    /^I (?:need|want|should|will|can|must|am going|have to|ought) (?:to )?(?:check|read|verify|look|see|examine|inspect|review|find|search|trace|cross|confirm)/i,
+    /^I (?:need|want|should|will|can|must|am going|have to|ought) (?:to )?(?:think|consider|figure|recall|re-?read|re-examine|re-check|analyze|break down|map)/i,
+    /^I (?:need|want|should|will|can|must|am going|have to|ought) (?:to )?(?:write|draft|compose|produce|generate|create|make|formulate|prepare|acknowledge|note|state|summarise|summarize|outline|review|add|update|append|insert|extend)/i,
+    /^I\s+(?:will|am going to|am going|can|need to|want to)\s+(?:start|begin|proceed|take|do|handle)/i,
+    // Transitional filler / progress narration
+    /^(?:So|Now|First|Second|Third|Then|Next|Also|Finally|After(?:ward|wards)?)(?:,| I| I'm| I'll| we)/i,
+    /^(?:So|Yes),? in the /i,
+    /^(?:So|Yes),? (?:this|that|the|it|here|now)/i,
+    /^(?:So|Yes),? (?:I see|I can see|I notice)/i,
+    /^So this (?:setting|rule|statement|iron rule|piece|part|section|chapter)/i,
+    /^So I (?:should|will|am going|need|want|have|am)\b/i,
+    /^So I should:?\s*$/i,
+    /^Let'?s (?:check|read|verify|look|see|examine|inspect|review|find|search|trace|cross|confirm|think|consider)/i,
+    /^Now (?:I|we) (?:can|will|am going|need|should|have|must)/i,
+    /^First,? (?:I|we|let'?s|the next)/i,
+    /^Based on (?:the|this|what|that|reading)/i,
+    /^According to (?:the|this|what|that|reading)/i,
+    /^Going through /i,
+    // Source-checking meta
+    /^(?:Looking|Reading|Based on the context|Going through|Examining) (?:at |through )?/i,
+    /^(?:Checking|Cross-?checking|Confirming) (?:the |whether )?/i,
+    /^Yes,? (?:I see|I can see|I notice|that|this|the|in|here)/i,
+    // Implicit planning with reference to "setting / rule / file" mid-clause
+    /^This (?:setting|rule|statement|iron rule|piece|part|section|chapter) (?:already |seems to )/i,
+    // Self-planning bullets (with or without leading dash / bullet char)
+    /^[-\s•●○·\*]+(?:Acknowledge|Check|Confirm|Verify|Read|Update|Use|Make|Write|Add|Remove|Create|Insert|Append|Propagate|Summarise|Summarize|Note|Outline|Flag|Mark|Append|Add the|Write a|Update the|Create a)\b/i,
+    // Action header lines (e.g. "Acknowledge that …" / "Check if it …" /
+    // "Propagate to other places" without bullet char). Anchored at the
+    // start; rigorous enough to not catch legitimate prose.
+    /^(?:Acknowledge|Check|Confirm|Verify|Read|Update|Make|Write|Add|Remove|Create|Insert|Append|Propagate|Summarise|Summarize|Note|Outline|Flag|Mark) (?:that |if |whether |this |the |to |a |an )/i,
+  ];
+  return narrationOpeners.some((re) => re.test(head));
+}
+
+/**
+ * For a single paragraph that mixes English narration with a Chinese answer
+ * (e.g. "Let me check story_frame.md ... 已经在 outline 第四节里写了"), keep only
+ * the part after the last English-narration sentence boundary.
+ */
+function splitNarrationFromAnswer(text: string): { answer: string; dropped: string } {
+  // Try to find a transition: a sentence that ends with English narration
+  // verbs followed by Chinese content. We look for sentence boundaries (". "),
+  // and treat segments whose first ~80 chars read as English narration as
+  // droppable.
+  const segments = text.split(/(?<=[。\.!?！？])\s+/);
+  const cjkRegex = /[\u4e00-\u9fff]/;
+  const keptSegments: string[] = [];
+  let droppedSegments: string[] = [];
+  for (const segment of segments) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const head = trimmed.slice(0, 240);
+    if (keptSegments.length === 0 && isThinkingAloudParagraph(head)) {
+      droppedSegments.push(segment);
+      continue;
+    }
+    // Once we have at least one CJK-rich segment, keep everything after.
+    if (keptSegments.length > 0 || cjkRegex.test(trimmed)) {
+      keptSegments.push(segment);
+    }
+  }
+  return {
+    answer: keptSegments.join(" ").trim(),
+    dropped: droppedSegments.join(" ").trim(),
+  };
 }
 
 /**
@@ -1109,7 +1290,7 @@ async function runAgentSessionUnlocked(
 
     if (role === "assistant" && sessionKind === "book" && !successfulProductionToolResultSeen) {
       const assistant = event.message as AssistantMessage;
-      if (looksLikeUnsavedChapterProse(extractTextFromAssistant(assistant))) {
+      if (looksLikeUnsavedChapterProse(sanitizeVisibleReply(extractTextFromAssistant(assistant), language))) {
         replaceAssistantText(assistant, bookRawChapterBoundaryText(language));
       }
     }
@@ -1200,7 +1381,16 @@ async function runAgentSessionUnlocked(
   // ----- Extract result -----
   const allMessages = agent.state.messages;
   finalAssistant ??= lastAssistantMessage(allMessages);
-  const responseText = finalAssistant ? extractTextFromAssistant(finalAssistant) : "";
+  // Sanitize the visible reply: strip inline `<thinking>` blocks AND scrub
+  // English-language thinking-aloud narration paragraphs that reasoning
+  // models (MiniMax-M2.7/M3, DeepSeek-R1, kimi-k2-thinking) sometimes emit
+  // through the visible text channel when no separate reasoning_content is
+  // returned. Without this, Studio Chat shows the model's chain-of-thought
+  // ("The user wants to add a setting: …", "Let me check story_frame.md …",
+  // "So I should: Acknowledge …") AS the answer.
+  const responseText = finalAssistant
+    ? sanitizeVisibleReply(extractTextFromAssistant(finalAssistant), language)
+    : "";
   errorMessage ??= assistantErrorMessage(finalAssistant);
 
   return {
@@ -1287,3 +1477,114 @@ export async function rewindSessionToMessageIndex(
     targetIndex: messageIndex,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Internal exports (for unit tests in __tests__/sanitize-visible-reply.test.ts).
+// The sanitization layer was wired up defensively because MiniMax-M2.7/M3 and
+// similar reasoning models sometimes inject thinking-aloud text into the
+// visible content when no separate reasoning_content channel is returned.
+// Exporting the helpers lets us regression-test them in isolation without
+// driving a full Agent run.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// StreamingNarrativeSplitter — paragraph-level routing for chat UIs
+// ---------------------------------------------------------------------------
+//
+// MiniMax-M2.7/M3, DeepSeek-R1, kimi-k2-thinking and similar reasoning
+// models sometimes do NOT surface reasoning through a separate
+// `reasoning_content` channel — instead the model narrates its
+// chain-of-thought INSIDE the visible content. The previous
+// `sanitizeVisibleReply` post-processor stripped the narration, which
+// worked for CLI replies but hid everything from Studio's chat UI.
+//
+// This splitter is the second leg of that fix, designed for the streaming
+// path: it consumes model text deltas, classifies each completed
+// paragraph as either narration or real reply, and emits the narration as
+// `thinking_deltas` while forwarding the rest as `text_deltas`. Studio's
+// chat UI already routes `thinking_delta` events to a collapsible
+// `<Reasoning>` panel (see ChatPage.tsx), so the user gets a clean reply
+// bubble with reasoning tucked into a panel exactly like minimax-code's
+// behaviour.
+//
+// Lifecycle:
+//   - One instance per AssistantMessage being streamed.
+//   - The Studio SSE handler keeps a Map<messageTimestamp, splitter>
+//     inside the streaming closure; message_start / message_end events
+//     handle creation and final flush.
+//   - The class is pure state + a single regex classifier, no I/O,
+//     so it is safe to construct on every message.
+
+export interface StreamChannel {
+  /** Visible reply text (rendered in the main bubble). */
+  textDeltas: string[];
+  /** Reasoning / planning text (routed to the collapsible panel). */
+  thinkingDeltas: string[];
+}
+
+export class StreamingNarrativeSplitter {
+  private readonly isChinese: boolean;
+  /** Pending characters since the last paragraph boundary. */
+  private buffer: string = "";
+
+  constructor(language: string) {
+    this.isChinese =
+      language === "zh" || language === "zh-CN" || language === "zh-Hans";
+  }
+
+  /**
+   * Accept a streaming text chunk. Returns the routed deltas:
+   *   - `textDeltas` — paragraph(s) classified as user-facing reply
+   *   - `thinkingDeltas` — paragraph(s) classified as reasoning /
+   *     planning that should live in the collapsible thinking panel
+   *
+   * Paragraphs split on `\n\n` boundaries. Partial paragraphs remain in
+   * the buffer until either more text arrives or `flush()` is called at
+   * the end of the message.
+   */
+  acceptTextDelta(delta: string): StreamChannel {
+    const out: StreamChannel = { textDeltas: [], thinkingDeltas: [] };
+    if (!delta) return out;
+    this.buffer += delta;
+
+    let idx = this.buffer.indexOf("\n\n");
+    while (idx >= 0) {
+      const paragraph = this.buffer.slice(0, idx);
+      this.buffer = this.buffer.slice(idx + 2);
+      this.routeParagraph(paragraph, out);
+      idx = this.buffer.indexOf("\n\n");
+    }
+    return out;
+  }
+
+  /**
+   * Flush any remaining text in the buffer at the end of a message.
+   * Always safe to call; emits nothing if the buffer is empty.
+   */
+  flush(): StreamChannel {
+    const out: StreamChannel = { textDeltas: [], thinkingDeltas: [] };
+    if (!this.buffer.trim()) {
+      this.buffer = "";
+      return out;
+    }
+    this.routeParagraph(this.buffer, out);
+    this.buffer = "";
+    return out;
+  }
+
+  private routeParagraph(paragraph: string, out: StreamChannel): void {
+    const trimmed = paragraph.trim();
+    if (!trimmed) return;
+    if (this.isChinese && isThinkingAloudParagraph(trimmed)) {
+      // Routing narration into a leading newline keeps the final assembled
+      // thinking panel visually separated from the prior paragraph even
+      // when multiple reasoning chunks accumulate.
+      out.thinkingDeltas.push(trimmed.length === paragraph.length ? paragraph : trimmed);
+    } else {
+      out.textDeltas.push(paragraph);
+    }
+  }
+}
+
+/** @internal — exported for tests only. */
+export const __test = { sanitizeVisibleReply, isThinkingAloudParagraph, narrationOnlyFallback, StreamingNarrativeSplitter };

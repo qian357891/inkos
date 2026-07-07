@@ -16,6 +16,7 @@ import { fetchWithProxy } from "../utils/proxy-fetch.js";
 import { isApiKeyOptionalForEndpoint } from "../utils/llm-endpoint-auth.js";
 import { isLlmStubEnabled, stubChatCompletion } from "../agent/llm-stub.js";
 import { createLeadingThinkTagStripper, stripLeadingThinkBlock } from "./think-tag-stripper.js";
+import { stripReasoning } from "../utils/strip-reasoning.js";
 
 
 // === Streaming Monitor Types ===
@@ -102,7 +103,23 @@ export function createStreamMonitor(
 // === Shared Types ===
 
 export interface LLMResponse {
+  /**
+   * Visible reply text the model produced for the user. MUST NOT contain the
+   * model's internal reasoning — providers that expose a separate reasoning
+   * channel keep that in `reasoningContent`; providers that inline reasoning
+   * via XML tags (`<thinking>` / `<reasoning>` / `###`) are stripped at the
+   * provider boundary by `stripReasoning`. Callers can rely on this being
+   * safe to render to the user.
+   */
   readonly content: string;
+  /**
+   * Separate reasoning channel text, when the provider surfaced one
+   * (e.g. OpenAI `reasoning_content` for MiniMax-M3 / DeepSeek-R1 / o1-style
+   * models). Used for tracing and debugging only — never for the user-visible
+   * reply. Empty when the model did not produce reasoning, or when the
+   * provider does not expose the channel separately.
+   */
+  readonly reasoningContent?: string;
   readonly usage: {
     readonly promptTokens: number;
     readonly completionTokens: number;
@@ -801,8 +818,37 @@ function extractOpenAITextPart(value: any): string {
 }
 
 function extractChatContent(json: any): string {
+  // Only return the user-visible content channel. Reasoning must NEVER be
+  // silently substituted here — see `extractChatReasoningContent` below and
+  // the chat boundary at the end of chatCompletionViaCustomOpenAICompatible.
+  // A reasoning-only response is a contract error from the model side, and
+  // we want callers to see it as such (empty content) rather than getting
+  // internal monologue surfaced as if it were the reply.
   const message = json?.choices?.[0]?.message;
-  return extractOpenAITextPart(message?.content) || extractOpenAITextPart(message?.reasoning_content);
+  return extractOpenAITextPart(message?.content);
+}
+
+function extractChatReasoningContent(json: any): string {
+  const message = json?.choices?.[0]?.message;
+  return extractOpenAITextPart(message?.reasoning_content);
+}
+
+/**
+ * Provider-boundary safety net for the user-visible `content` field.
+ *
+ * Some reasoning models (MiniMax-M2.7 / M3, DeepSeek-R1, and others) leak
+ * internal thinking into the visible `content` channel as raw `<thinking>`
+ * or `<reasoning>` blocks instead of (or in addition to) the separate
+ * reasoning channel. `stripReasoning` removes those blocks defensively so
+ * no caller downstream accidentally treats them as the user-visible reply.
+ *
+ * This function is intentional belt-and-suspenders: agents that consume the
+ * response (Architect / Writer / Planner) already run `stripReasoning` in
+ * their own parsers, and we want every other consumer (chat, session
+ * transcript restore, etc.) to inherit the same guarantee.
+ */
+function applyContentBoundary(content: string): string {
+  return stripReasoning(content);
 }
 
 function extractChatDeltaContent(json: any): string {
@@ -879,7 +925,7 @@ async function chatCompletionViaCustomAnthropicCompatible(
 
   if (!client.stream) {
     const json = await response.json() as any;
-    const content = extractAnthropicContent(json);
+    const content = applyContentBoundary(extractAnthropicContent(json));
     if (!content) {
       throw wrapLLMError(new Error("LLM returned empty response"), errorCtx);
     }
@@ -943,7 +989,11 @@ async function chatCompletionViaCustomAnthropicCompatible(
   if (!usage.totalTokens) {
     usage.totalTokens = usage.promptTokens + usage.completionTokens;
   }
-  return { content, usage };
+  const safeContent = applyContentBoundary(content);
+  if (!safeContent) {
+    throw wrapLLMError(new Error("LLM returned empty response after reasoning strip"), errorCtx);
+  }
+  return { content: safeContent, usage };
 }
 
 async function chatCompletionViaCustomOpenAICompatible(
@@ -987,7 +1037,7 @@ async function chatCompletionViaCustomOpenAICompatible(
 
     if (!client.stream) {
       const json = await response.json() as any;
-      const content = extractResponsesContent(json);
+      const content = applyContentBoundary(extractResponsesContent(json));
       if (!content) {
         throw wrapLLMError(new Error("LLM returned empty response"), errorCtx);
       }
@@ -1049,7 +1099,11 @@ async function chatCompletionViaCustomOpenAICompatible(
       // Responses 协议的正常结束必须有 response.completed/incomplete 终止事件
       throw new PartialResponseError(content, new Error("stream closed without response.completed"));
     }
-    return { content, usage };
+    const safeContent = applyContentBoundary(content);
+    if (!safeContent) {
+      throw wrapLLMError(new Error("LLM returned empty response after reasoning strip"), errorCtx);
+    }
+    return { content: safeContent, usage };
   }
 
   const payload: Record<string, unknown> = {
@@ -1091,16 +1145,21 @@ async function chatCompletionViaCustomOpenAICompatible(
     throw wrapLLMError(new Error(detail), errorCtx);
   }
 
-  if (!client.stream) {
+if (!client.stream) {
     const json = await response.json() as any;
     // MiniMax M2.x 等模型可能把思考内容以 <think>...</think> 内联在 content 开头，
     // 剥掉起始处的完整 think 块，防止思考内容混进章节/对话正文（issue #329）。
-    const content = stripLeadingThinkBlock(extractChatContent(json));
+    // applyContentBoundary 仍作为兜底，处理任何位置的 thinking 标签。
+    const rawContent = stripLeadingThinkBlock(extractChatContent(json));
+    const rawReasoning = extractChatReasoningContent(json);
+    const content = applyContentBoundary(rawContent);
+    const reasoningContent = rawReasoning || "";
     if (!content) {
       throw wrapLLMError(new Error("LLM returned empty response"), errorCtx);
     }
     return {
       content,
+      ...(reasoningContent ? { reasoningContent } : {}),
       usage: {
         promptTokens: json?.usage?.prompt_tokens ?? 0,
         completionTokens: json?.usage?.completion_tokens ?? 0,
@@ -1109,7 +1168,7 @@ async function chatCompletionViaCustomOpenAICompatible(
     };
   }
 
-  const reader = response.body?.getReader();
+const reader = response.body?.getReader();
   if (!reader) throw wrapLLMError(new Error("Streaming body unavailable"), errorCtx);
   const decoder = new TextDecoder();
   let buffer = "";
@@ -1169,16 +1228,38 @@ async function chatCompletionViaCustomOpenAICompatible(
     monitor.stop();
   }
 
+  // Reasoning and visible reply are SEPARATE channels. If the model put
+  // reasoning in a `reasoning_content` field, we keep it on the side and
+  // return it as `reasoningContent` for tracing only. We never silently
+  // substitute reasoning for the visible reply when the latter is empty —
+  // that surfaced internal monologue as if it were the user-visible answer
+  // in earlier versions, which is exactly what callers should not see.
+  //
+  // Inline `<thinking>` / `<reasoning>` blocks that some providers (notably
+  // MiniMax-M2.7/M3) leak into the visible `content` field are stripped
+  // here at the provider boundary so every downstream consumer (chat
+  // reply, session restore, agent parsers) inherits the same guarantee.
+  //
+  // applyContentBoundary is the defensive net for any other position
+  // (mid-text, multiple blocks, unclosed tags from SSE truncation). The
+  // leading-think stripper above handles the #329 case at the streaming
+  // entry point so we never broadcast the leading think block to UI in
+  // the first place.
   // 流结束仍缓冲在剥离器里的文本（未闭合的 think 块等）原样并回，避免数据丢失。
   content += thinkStripper.flush();
-  const finalContent = content || reasoningContent;
+  const safeContent = applyContentBoundary(content);
+  const finalContent = safeContent || reasoningContent;
   if (!finalContent) {
     throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
   }
   if (!sawTerminal) {
-    throw new PartialResponseError(finalContent, new Error("stream closed without [DONE]/finish_reason"));
+    throw new PartialResponseError(safeContent, new Error("stream closed without [DONE]/finish_reason"));
   }
-  return { content: finalContent, usage };
+  return {
+    content: safeContent,
+    ...(reasoningContent ? { reasoningContent } : {}),
+    usage,
+  };
 }
 
 // === Simple Chat (used by all agents via BaseAgent.chat()) ===
@@ -1300,10 +1381,16 @@ async function chatCompletionViaPiAi(
     if (response.stopReason === "error" && response.errorMessage) {
       throw new Error(response.errorMessage);
     }
-    const content = response.content
-      .filter((block): block is { type: "text"; text: string } => block.type === "text")
-      .map((block) => block.text)
+    const textBlocks = response.content.filter(
+      (block): block is { type: "text"; text: string } => block.type === "text",
+    );
+    const thinkingBlocks = (response.content as ReadonlyArray<{ type: string; thinking?: string }>)
+      .filter((block) => block.type === "thinking");
+    const rawContent = textBlocks.map((block) => block.text).join("");
+    const reasoningContent = thinkingBlocks
+      .map((block) => typeof block.thinking === "string" ? block.thinking : "")
       .join("");
+    const content = applyContentBoundary(rawContent);
     if (!content) {
       const diag = `usage=${response.usage.input}+${response.usage.output}`;
       console.warn(`[inkos] LLM 非流式响应无文本内容 (${diag})`);
@@ -1311,6 +1398,7 @@ async function chatCompletionViaPiAi(
     }
     return {
       content,
+      ...(reasoningContent ? { reasoningContent } : {}),
       usage: {
         promptTokens: response.usage.input,
         completionTokens: response.usage.output,
@@ -1363,18 +1451,19 @@ async function chatCompletionViaPiAi(
   }
 
   const content = chunks.join("");
-  if (!content) {
+  const safeContent = applyContentBoundary(content);
+  if (!safeContent) {
     const diag = `usage=${inputTokens}+${outputTokens}`;
     console.warn(`[inkos] LLM 流式响应无文本内容 (${diag})`);
     throw new Error(`LLM returned empty response from stream (${diag})`);
   }
   if (!sawDone) {
     // 事件流没有以 done 收尾就结束 = 上游把流掐断了，内容不可信
-    throw new PartialResponseError(content, new Error("stream ended without done event"));
+    throw new PartialResponseError(safeContent, new Error("stream ended without done event"));
   }
 
   return {
-    content,
+    content: safeContent,
     usage: {
       promptTokens: inputTokens,
       completionTokens: outputTokens,

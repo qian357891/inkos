@@ -470,7 +470,13 @@ describe("chatCompletion via pi-ai", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses reasoning_content for custom openai-compatible non-stream responses that omit content", async () => {
+  it("does NOT substitute reasoning_content when the visible content is missing (custom openai-compatible, non-stream)", async () => {
+    // Regression guard: when a reasoning-only model (MiniMax-M3 / DeepSeek-R1 / kimi-k2.5)
+    // returns empty `content` and puts everything in `reasoning_content`, the
+    // provider boundary MUST surface this as a failed reply (empty content
+    // error) rather than silently substituting internal monologue as the
+    // visible answer. Reasoning-only responses are exposed via
+    // `LLMResponse.reasoningContent` only.
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -489,15 +495,56 @@ describe("chatCompletion via pi-ai", () => {
         baseUrl: "https://gateway.example/v1",
       },
     });
-    const result = await chatCompletion(client, "glm-compat", [{ role: "user", content: "nihao" }]);
 
-    expect(result.content).toBe("推理通道文本");
+    await expect(
+      chatCompletion(client, "glm-compat", [{ role: "user", content: "nihao" }]),
+    ).rejects.toThrow(/empty/i);
     expect(fetchMock).toHaveBeenCalledOnce();
 
     vi.unstubAllGlobals();
   });
 
-  it("uses reasoning_content for custom openai-compatible streams that omit content deltas", async () => {
+  it("preserves reasoning_content as a separate field when both content and reasoning_content are populated", async () => {
+    // When the model writes both channels, the visible reply goes to
+    // `content` and the internal monologue goes to `reasoningContent`.
+    // The provider boundary MUST keep them separated; downstream callers
+    // (chat tool, agent parsers) can rely on `content` being safe to render.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: "你好",
+            reasoning_content: "先组织语言再说你好",
+          },
+        }],
+        usage: { prompt_tokens: 3, completion_tokens: 5, total_tokens: 8 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "custom",
+      stream: false,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://gateway.example/v1",
+      },
+    });
+    const result = await chatCompletion(client, "glm-compat", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("你好");
+    expect(result.reasoningContent).toBe("先组织语言再说你好");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT substitute reasoning_content for custom openai-compatible streams that omit content deltas", async () => {
+    // Streaming counterpart of the non-stream regression guard. When the
+    // server emits only `reasoning_content` deltas and never opens a
+    // content channel, the provider boundary raises an empty-response
+    // error instead of returning the internal monologue as visible content.
     const encoder = new TextEncoder();
     const sse = [
       "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"你\"}}]}\n\n",
@@ -525,11 +572,52 @@ describe("chatCompletion via pi-ai", () => {
         baseUrl: "https://gateway.example/v1",
       },
     });
-    const result = await chatCompletion(client, "glm-compat", [{ role: "user", content: "nihao" }]);
 
-    expect(result.content).toBe("你好");
-    expect(result.usage.totalTokens).toBe(5);
+    await expect(
+      chatCompletion(client, "glm-compat", [{ role: "user", content: "nihao" }]),
+    ).rejects.toThrow(/empty/i);
     expect(fetchMock).toHaveBeenCalledOnce();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("strips inline <thinking>/<reasoning> blocks leaking into custom openai-compatible content (non-stream)", async () => {
+    // Defensive layer at the provider boundary: some models (MiniMax-M2.7/M3,
+    // DeepSeek-R1) bypass the dedicated reasoning channel and inline
+    // `<thinking>...</thinking>` blocks directly into the visible content.
+    // `applyContentBoundary` MUST remove them before the response reaches
+    // downstream callers, otherwise users see internal monologue as the
+    // chat reply.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            content:
+              "<thinking>用户加了设定铁律四，我先确认是否已经在 story_frame 里写过。</thinking>\n"
+              + "已经写在 story_frame.md 的「死亡与伤害兑现」小节。需要继续补充吗？",
+          },
+        }],
+        usage: { prompt_tokens: 3, completion_tokens: 12, total_tokens: 15 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "custom",
+      stream: false,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://gateway.example/v1",
+      },
+    });
+    const result = await chatCompletion(client, "glm-compat", [{ role: "user", content: "加一条设定" }]);
+
+    expect(result.content).not.toMatch(/<thinking>/);
+    expect(result.content).not.toMatch(/<\/thinking>/);
+    expect(result.content).toContain("已经写在 story_frame.md");
+    expect(result.content).toContain("「死亡与伤害兑现」");
 
     vi.unstubAllGlobals();
   });

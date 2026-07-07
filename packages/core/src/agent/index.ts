@@ -26,6 +26,8 @@ export {
   rewindSessionToMessageIndex,
   runAgentSession,
   evictAgentCache,
+  StreamingNarrativeSplitter,
+  type StreamChannel,
   type AgentSessionAttachment,
   type AgentSessionConfig,
   type AgentSessionResult,

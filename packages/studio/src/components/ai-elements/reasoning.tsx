@@ -97,12 +97,29 @@ export const Reasoning = memo(
       }
     }, [isStreaming, setDuration]);
 
-    // Auto-open when streaming starts (unless explicitly closed)
+    // Auto-open when streaming starts (unless explicitly closed).
+    //
+    // We only run this once at the start of a stream — guarded by the
+    // `hasEverStreamedRef.current` flag we maintain anyway — because
+    // re-running it on every isOpen/isStreaming change created a fight
+    // with the user's manual toggle: clicking the trigger to close
+    // the panel during streaming would flip isOpen to false, this
+    // effect would immediately reopen it, and the panel would not
+    // stay closed. The mount-time `defaultProp` already covers the
+    // initial open; everything after that is the user's choice.
     useEffect(() => {
-      if (isStreaming && !isOpen && !isExplicitlyClosed) {
+      if (
+        isStreaming &&
+        !isOpen &&
+        !isExplicitlyClosed &&
+        !hasEverStreamedRef.current
+      ) {
         setIsOpen(true);
       }
-    }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed]);
+      // Deliberately omit `isOpen` / `setIsOpen` from deps so the
+      // effect only runs when the streaming flag transitions.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isStreaming, isExplicitlyClosed]);
 
     // Auto-close when streaming ends (once only, and only if it ever streamed)
     useEffect(() => {
