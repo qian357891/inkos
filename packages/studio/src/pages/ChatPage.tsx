@@ -1,9 +1,9 @@
-import { memo, useRef, useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
 import { fetchJson, postApi, useApi } from "../hooks/use-api";
-import type { ChatAttachmentPayload, MessagePart } from "../store/chat/types";
+import type { ChatAttachmentPayload } from "../store/chat/types";
 import { chatSelectors, useChatStore } from "../store/chat";
 import type { ChatSessionKind } from "../store/chat";
 import { useServiceStore } from "../store/service";
@@ -13,14 +13,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "../components/ui/dropdown-menu";
-import {
-  Reasoning,
-  ReasoningTrigger,
-  ReasoningContent,
-} from "../components/ai-elements/reasoning";
 import { ChatMessage } from "../components/chat/ChatMessage";
 import { QuickActions } from "../components/chat/QuickActions";
-import { ToolExecutionSteps, type ProposedActionDetails } from "../components/chat/ToolExecutionSteps";
+import { TaskExecutionTrace } from "../components/chat/TaskExecutionTrace";
+import type { ProposedActionDetails } from "../components/chat/ToolExecutionSteps";
 import { ProjectArtifactDrawer } from "../components/chat/ProjectArtifactDrawer";
 import { PlayHud } from "../components/chat/PlayHud";
 import { PlayChoicePanel } from "../components/chat/PlayChoicePanel";
@@ -173,86 +169,6 @@ function cancelScrollFrame(id: ScrollFrameId): void {
   }
   globalThis.clearTimeout(id);
 }
-
-type AssistantRenderItem =
-  | { kind: "thinking"; pi: number; part: Extract<MessagePart, { type: "thinking" }> }
-  | { kind: "text"; pi: number; part: Extract<MessagePart, { type: "text" }> }
-  | { kind: "tools"; parts: Array<Extract<MessagePart, { type: "tool" }>>; startIdx: number };
-
-function groupAssistantParts(parts: ReadonlyArray<MessagePart>): AssistantRenderItem[] {
-  const items: AssistantRenderItem[] = [];
-  for (let pi = 0; pi < parts.length; pi += 1) {
-    const part = parts[pi];
-    if (part.type === "thinking") {
-      items.push({ kind: "thinking", pi, part });
-    } else if (part.type === "text") {
-      items.push({ kind: "text", pi, part });
-    } else if (part.type === "tool") {
-      const last = items[items.length - 1];
-      if (last?.kind === "tools") {
-        last.parts.push(part);
-      } else {
-        items.push({ kind: "tools", parts: [part], startIdx: pi });
-      }
-    }
-  }
-  return items;
-}
-
-const AssistantMessageParts = memo(function AssistantMessageParts({
-  parts,
-  timestamp,
-  theme,
-  onProposedAction,
-  onRejectProposedAction,
-}: {
-  readonly parts: ReadonlyArray<MessagePart>;
-  readonly timestamp: number;
-  readonly theme: Theme;
-  readonly onProposedAction?: (details: ProposedActionDetails) => void;
-  readonly onRejectProposedAction?: (details: ProposedActionDetails) => void;
-}) {
-  const items = useMemo(() => groupAssistantParts(parts), [parts]);
-
-  return (
-    <>
-      {items.map((item) => {
-        if (item.kind === "thinking") {
-          return (
-            <div key={`t-${item.pi}`} className="mb-2">
-              <Reasoning isStreaming={item.part.streaming}>
-                <ReasoningTrigger />
-                <ReasoningContent>{item.part.content}</ReasoningContent>
-              </Reasoning>
-            </div>
-          );
-        }
-        if (item.kind === "tools") {
-          return (
-            <ToolExecutionSteps
-              key={`x-${item.startIdx}`}
-              executions={item.parts.map((part) => part.execution)}
-              onProposedAction={onProposedAction}
-              onRejectProposedAction={onRejectProposedAction}
-            />
-          );
-        }
-        if (item.kind === "text" && item.part.content) {
-          return (
-            <ChatMessage
-              key={`c-${item.pi}`}
-              role="assistant"
-              content={item.part.content}
-              timestamp={timestamp}
-              theme={theme}
-            />
-          );
-        }
-        return null;
-      })}
-    </>
-  );
-});
 
 function SkillPickerPanel({
   isZh,
@@ -963,70 +879,17 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                     )}
                   </div>
                 ) : msg.parts && msg.parts.length > 0 ? (
-                  /* Assistant message — parts-based rendering (chronological) */
-                  /* Merge consecutive utility tool parts into one group */
-                  <>
-                    {(() => {
-                      type RenderItem =
-                        | { kind: "thinking"; pi: number; part: Extract<typeof msg.parts[0], { type: "thinking" }> }
-                        | { kind: "text"; pi: number; part: Extract<typeof msg.parts[0], { type: "text" }> }
-                        | { kind: "tools"; parts: Array<Extract<typeof msg.parts[0], { type: "tool" }>>; startIdx: number };
-
-                      const items: RenderItem[] = [];
-                      for (let pi = 0; pi < msg.parts!.length; pi++) {
-                        const part = msg.parts![pi];
-                        if (part.type === "thinking") {
-                          items.push({ kind: "thinking", pi, part });
-                        } else if (part.type === "text") {
-                          items.push({ kind: "text", pi, part });
-                        } else if (part.type === "tool") {
-                          // Merge consecutive tool parts into one group
-                          const last = items[items.length - 1];
-                          if (last?.kind === "tools") {
-                            last.parts.push(part);
-                          } else {
-                            items.push({ kind: "tools", parts: [part], startIdx: pi });
-                          }
-                        }
-                      }
-
-                      return items.map((item) => {
-                        if (item.kind === "thinking") {
-                          return (
-                            <div key={`t-${item.pi}`} className="mb-2">
-                              <Reasoning isStreaming={item.part.streaming}>
-                                <ReasoningTrigger />
-                                <ReasoningContent>{item.part.content}</ReasoningContent>
-                              </Reasoning>
-                            </div>
-                          );
-                        }
-                        if (item.kind === "tools") {
-                          return (
-                            <ToolExecutionSteps
-                              key={`x-${item.startIdx}`}
-                              executions={item.parts.map(p => p.execution)}
-                              onProposedAction={handleProposedAction}
-                              onRejectProposedAction={handleRejectProposedAction}
-                              onOpenFilmStudio={nav.toFilmStudio}
-                            />
-                          );
-                        }
-                        if (item.kind === "text" && item.part.content) {
-                          return (
-                            <ChatMessage
-                              key={`c-${item.pi}`}
-                              role="assistant"
-                              content={item.part.content}
-                              timestamp={msg.timestamp}
-                              theme={theme}
-                            />
-                          );
-                        }
-                        return null;
-                      });
-                    })()}
-                  </>
+                  /* Assistant message — single task-level trace panel
+                     collapses "思考 N 次, 执行 M 条命令" and, when expanded,
+                     shows the chronological thinking + tool + text parts. */
+                  <TaskExecutionTrace
+                    parts={msg.parts}
+                    timestamp={msg.timestamp}
+                    theme={theme}
+                    onProposedAction={handleProposedAction}
+                    onRejectProposedAction={handleRejectProposedAction}
+                    onOpenFilmStudio={nav.toFilmStudio}
+                  />
                 ) : (
                   /* Assistant message — fallback (no parts, e.g. error messages) */
                   <ChatMessage
