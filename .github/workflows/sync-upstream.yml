@@ -1,0 +1,128 @@
+name: Sync upstream master
+
+# 自动把 Narcooo/inkos:master 的新 commits merge 到本 fork 的 master。
+# - 每天 UTC 0 点跑一次
+# - 也支持手动触发（Actions → Sync upstream master → Run workflow）
+# - 用 PAT push（默认 GITHUB_TOKEN 对 fork push 权限受限）
+# - merge 方式保留你独有的 10 个 commits 作为独立节点
+# - 冲突时不自动 force，发 GitHub Issue 通知手动解决
+#
+# 依赖：在 repo settings/secrets/actions 配 UPSTREAM_SYNC_TOKEN（PAT，repo 权限）
+
+on:
+  schedule:
+    - cron: '0 0 * * *'    # 每天 UTC 00:00
+    - cron: '0 12 * * *'   # 每天 UTC 12:00（额外兜底，避免单次失败导致 24h 滞后）
+  workflow_dispatch:
+    inputs:
+      allow_conflict_force:
+        description: 'Force push even if there are conflicts (NOT recommended)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream into master
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # PAT 用于推自己的 fork（默认 GITHUB_TOKEN 无此权限）
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "inkos-sync-bot"
+          git config user.email "inkos-sync-bot@users.noreply.github.com"
+          git remote add upstream https://github.com/Narcooo/inkos.git 2>/dev/null \
+            || git remote set-url upstream https://github.com/Narcooo/inkos.git
+          git fetch upstream --no-tags
+          git fetch origin --no-tags
+
+      - name: Detect divergence
+        id: div
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/master)
+          AHEAD=$(git rev-list --count upstream/master..HEAD)
+          echo "behind=$BEHIND ahead=$AHEAD"
+          echo "BEHIND=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "AHEAD=$AHEAD" >> "$GITHUB_OUTPUT"
+
+      - name: Already up to date
+        if: steps.div.outputs.BEHIND == '0'
+        run: |
+          echo "✅ master is already up to date with upstream (ahead=${{ steps.div.outputs.AHEAD }} behind=0)."
+
+      - name: Merge upstream
+        if: steps.div.outputs.BEHIND != '0'
+        id: merge
+        run: |
+          # --no-ff 保留 merge commit，让独有 commits 保持独立节点
+          git merge upstream/master \
+            --no-ff \
+            -m "chore(sync): merge upstream/master ($(date -u +%Y-%m-%dT%H:%M:%SZ), behind=${{ steps.div.outputs.BEHIND }})" \
+            && echo "merge_ok=true" >> "$GITHUB_OUTPUT" \
+            || echo "merge_ok=false" >> "$GITHUB_OUTPUT"
+
+      - name: Abort on conflict (safe default)
+        if: steps.merge.outputs.merge_ok == 'false' && github.event.inputs.allow_conflict_force != 'true'
+        run: |
+          git merge --abort || true
+          echo "❌ merge produced conflicts — aborted, will open an Issue."
+
+      - name: Push to fork
+        if: steps.merge.outputs.merge_ok == 'true'
+        run: |
+          git push origin master --force-with-lease
+          echo "✅ Pushed (ahead=${{ steps.div.outputs.AHEAD }}, behind was ${{ steps.div.outputs.BEHIND }})."
+
+      - name: Open conflict issue
+        if: steps.merge.outputs.merge_ok == 'false' && github.event.inputs.allow_conflict_force != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const execSync = require('child_process').execSync;
+            const files = execSync('git diff --name-only --diff-filter=U 2>/dev/null || true')
+              .toString().trim().split('\n').filter(Boolean);
+            const behind = ${{ steps.div.outputs.BEHIND }};
+            const ahead = ${{ steps.div.outputs.AHEAD }};
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `sync: merge conflict from upstream (${new Date().toISOString().slice(0,10)})`,
+              body: [
+                'Automated sync from `Narcooo/inkos:master` failed with merge conflicts.',
+                '',
+                `**Divergence:** ahead=${ahead}, behind=${behind}`,
+                '',
+                '**Conflicting files:**',
+                ...files.map(f => `- \`${f}\``),
+                '',
+                '### Resolve manually',
+                '```bash',
+                'git fetch upstream',
+                'git checkout master',
+                'git merge upstream/master',
+                '# resolve the conflicts listed above',
+                'git add .',
+                'git commit -m "chore(sync): resolve merge conflicts"',
+                'git push origin master --force-with-lease',
+                '```',
+                '',
+                'After pushing, this issue can be closed manually.',
+              ].join('\n'),
+              labels: ['sync-conflict'],
+            });
+            core.setOutput('issue_opened', true);
