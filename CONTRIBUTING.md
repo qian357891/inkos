@@ -57,7 +57,7 @@ Keep commits atomic — one logical change per commit. Split new files, interfac
 - Immutable patterns: `{ ...obj, key: value }` over mutation
 - Functions < 50 lines, files < 800 lines
 - Errors must surface, not be swallowed (`catch { }` without re-throw needs a comment)
-- `workspace:*` stays in source `package.json` — the CI pipeline handles version replacement at publish time
+- Publishable package manifests must use registry-installable internal versions, not `workspace:*`; `pnpm` links local packages through the workspace config during development.
 
 ## Adding a CLI Command
 

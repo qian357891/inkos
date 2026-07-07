@@ -1,6 +1,6 @@
 {
   "name": "@actalk/inkos-core",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "InkOS core engine for story creation agents: governed context, writing, audit, revision, covers, and interactive worlds",
   "keywords": [
     "story-creation-ai-agent",

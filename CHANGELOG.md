@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.3
+
+### Hotfix
+
+- 修复 `@actalk/inkos@1.6.2` / `@actalk/inkos-studio@1.6.2` 发布到 npm 时 registry manifest 泄漏 `workspace:*` 的问题；Windows / npm 全局升级请直接安装 `1.6.3` 或更新到 `latest`
+- 发布校验现在会拒绝 publishable manifest 中的 `workspace:` 依赖，避免同类安装错误复发
+- MiniMax 官方 OpenAI-compatible 接入新增 `MiniMax-M3` 模型卡，并对 `MiniMax-M3*` 默认发送 `thinking: { "type": "disabled" }`，减少接口默认返回 thinking 内容的问题
+
 ## v1.6.2
 
 ### Release Focus

@@ -130,6 +130,8 @@ Studio を開き、**モデル設定**へ進みます：
 
 Studio はプロジェクトのサービス設定と `.inkos/secrets.json` を使います。env が検出されてもヒントとして表示するだけで、Studio で選んだ service / model / base URL / API Key を上書きしません。
 
+MiniMax は公式 OpenAI-compatible `/v1/chat/completions` エンドポイントを使用します。InkOS は `MiniMax-M3*` の thinking 返却をデフォルトで無効化します。M2.x の thinking は上流サービス側の制限により無効化できません。
+
 **方法2：CLI / daemon / デプロイ環境の env 設定**
 
 ```bash

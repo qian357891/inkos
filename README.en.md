@@ -165,6 +165,8 @@ Open Studio, then go to **Model Settings**:
 
 Studio uses project service settings and `.inkos/secrets.json`. It may show env-detection hints, but env files do not override the Studio-selected service/model/base URL/API key.
 
+MiniMax uses the official OpenAI-compatible `/v1/chat/completions` endpoint. InkOS disables returned thinking by default for `MiniMax-M3*`; M2.x thinking cannot be disabled by the upstream service.
+
 **Option 2: CLI / daemon / deployment env config**
 
 ```bash

@@ -1,15 +1,13 @@
 /**
- * Verify that source manifests are publishable once prepack normalization runs.
+ * Verify that source manifests are publishable as registry manifests.
  *
  * Usage:
  *   node scripts/verify-no-workspace-protocol.mjs packages/cli packages/core
  *   node ../../scripts/verify-no-workspace-protocol.mjs .
  *
- * This script is safe to run on source manifests before prepack.
- *
  * Checks two invariants before publish:
- * 1. workspace:* / workspace:^ / workspace:~ references can be normalized to real versions
- * 2. non-workspace internal dependencies already point at the current workspace version
+ * 1. dependencies / optionalDependencies / peerDependencies contain no workspace: specifiers
+ * 2. internal workspace dependencies point at the current workspace version
  */
 
 import { access, readdir, readFile } from "node:fs/promises";
@@ -64,14 +62,6 @@ async function loadWorkspaceVersions(workspaceRoot) {
   return versions;
 }
 
-function normalizeWorkspaceSpecifier(specifier, version) {
-  const value = specifier.slice("workspace:".length);
-  if (value === "*" || value === "") return version;
-  if (value === "^") return `^${version}`;
-  if (value === "~") return `~${version}`;
-  return value;
-}
-
 let failed = false;
 const workspaceRoot = await findWorkspaceRoot(process.cwd());
 const workspaceVersions = await loadWorkspaceVersions(workspaceRoot);
@@ -93,25 +83,11 @@ for (const dirArg of dirs) {
       }
 
       if (specifier.startsWith("workspace:")) {
-        if (!workspaceVersion) {
-          process.stderr.write(`FAIL: ${dir} — ${field}.${name}: ${specifier} (workspace package not found)\n`);
-          dirFailed = true;
-          failed = true;
-          continue;
-        }
-
-        const normalized = normalizeWorkspaceSpecifier(specifier, workspaceVersion);
-        if (
-          normalized !== workspaceVersion
-          && normalized !== `^${workspaceVersion}`
-          && normalized !== `~${workspaceVersion}`
-        ) {
-          process.stderr.write(
-            `FAIL: ${dir} — ${field}.${name}: ${specifier} normalizes to ${normalized}, expected ${workspaceVersion}, ^${workspaceVersion}, or ~${workspaceVersion}\n`,
-          );
-          dirFailed = true;
-          failed = true;
-        }
+        process.stderr.write(
+          `FAIL: ${dir} — ${field}.${name}: ${specifier} (workspace protocol is not allowed in publish manifests)\n`,
+        );
+        dirFailed = true;
+        failed = true;
         continue;
       }
 

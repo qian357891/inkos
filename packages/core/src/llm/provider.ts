@@ -616,6 +616,9 @@ async function withTransientLLMRetry<T>(
 }
 
 function shouldUseNativeCustomTransport(client: LLMClient): boolean {
+  if (client.service === "minimax" && client.provider === "openai") {
+    return true;
+  }
   if (client.service === "kkaiapi" && client.provider === "openai") {
     return true;
   }
@@ -648,6 +651,16 @@ function buildCustomHeaders(client: LLMClient): Record<string, string> {
     ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     ...(client._piModel?.headers ?? {}),
   }) ?? { "Content-Type": "application/json" };
+}
+
+function defaultOpenAIChatExtra(client: LLMClient, model: string): Record<string, unknown> {
+  if (
+    client.service === "minimax"
+    && /^minimax-m3(?:$|[-_.])/i.test(model)
+  ) {
+    return { thinking: { type: "disabled" } };
+  }
+  return {};
 }
 
 function sanitizeHeaderApiKey(apiKey: string | undefined): string {
@@ -1041,6 +1054,7 @@ async function chatCompletionViaCustomOpenAICompatible(
     stream: client.stream,
     temperature: resolved.temperature,
     max_tokens: resolved.maxTokens,
+    ...defaultOpenAIChatExtra(client, model),
     ...extra,
   };
   if (client.stream) {

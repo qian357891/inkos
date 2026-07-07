@@ -117,11 +117,13 @@ describe.sequential("publish packaging", () => {
     }
   });
 
-  it("keeps source CLI dependencies linked through the workspace protocol", async () => {
+  it("keeps source publish dependencies registry-installable", async () => {
     const cliPackageJson = await sourceCliPackageJsonPromise;
+    const studioPackageJson = await sourceStudioPackageJsonPromise;
 
-    expect(cliPackageJson.dependencies["@actalk/inkos-core"]).toBe("workspace:*");
-    expect(cliPackageJson.dependencies["@actalk/inkos-studio"]).toBe("workspace:*");
+    expect(cliPackageJson.dependencies["@actalk/inkos-core"]).not.toMatch(/^workspace:/);
+    expect(cliPackageJson.dependencies["@actalk/inkos-studio"]).not.toMatch(/^workspace:/);
+    expect(studioPackageJson.dependencies["@actalk/inkos-core"]).not.toMatch(/^workspace:/);
   });
 
   it("verifies publishable manifests before npm publish runs", async () => {
@@ -138,7 +140,7 @@ describe.sequential("publish packaging", () => {
     );
   });
 
-  it("allows source workspace protocol manifests when they normalize cleanly for publish", async () => {
+  it("rejects workspace protocol in source publish manifests", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "inkos-publish-verify-pass-"));
     const tempPackagesDir = join(tempRoot, "packages");
     const tempCoreDir = join(tempPackagesDir, "core");
@@ -182,7 +184,7 @@ describe.sequential("publish packaging", () => {
             encoding: "utf-8",
             stdio: "pipe",
           },
-        )).not.toThrow();
+        )).toThrow(/workspace protocol is not allowed/);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -231,7 +233,7 @@ describe.sequential("publish packaging", () => {
             encoding: "utf-8",
             stdio: "pipe",
           },
-        )).toThrow(/normalizes to 0\.5\.0, expected 0\.5\.1/);
+        )).toThrow(/workspace protocol is not allowed/);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
