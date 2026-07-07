@@ -233,6 +233,49 @@ describe("session transcript codec", () => {
     ]);
   });
 
+  it("thinking blocks embedded in raw AgentMessage.content round-trip as thinkingBlocks", async () => {
+    // The Studio task-level "思考 N 次" counter depends on per-iteration
+    // thinking prose surviving the round trip through the transcript. The
+    // streaming path writes each `thinking:start` / `thinking:end` round
+    // as its own content block on the AssistantMessage, so the iteration
+    // count is already on disk inside `message.content` — restore just
+    // needs to re-derive the blocks rather than collapse them.
+    await appendManualSessionMessages(projectRoot, "s-blocks", [{
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "先看看目录" },
+        { type: "thinking", thinking: "再 diff" },
+        { type: "thinking", thinking: "最后 cherry-pick" },
+        { type: "text", text: "搞定了" },
+      ],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "fake",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 10,
+    }], "input", { sessionKind: "chat" });
+
+    const session = await deriveBookSessionFromTranscript(projectRoot, "s-blocks");
+    expect(session?.messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "搞定了",
+        thinkingBlocks: ["先看看目录", "再 diff", "最后 cherry-pick"],
+      }),
+    ]);
+    // The merged `thinking` field stays populated for legacy consumers that
+    // don't yet know about `thinkingBlocks`.
+    expect(session?.messages?.[0]?.thinking).toBe("先看看目录\n\n---\n\n再 diff\n\n---\n\n最后 cherry-pick");
+  });
+
   it("从 core index 导出 transcript helper", async () => {
     const core = await import("../index.js");
     expect(typeof core.readTranscriptEvents).toBe("function");

@@ -205,8 +205,18 @@ export function deserializeMessages(
     .filter((message) => message.role === "user" || message.role === "assistant")
     .map((message) => {
       const toolExecutions = extractSessionToolExecutions(message);
+      // Prefer per-iteration blocks (preserves the "思考 N 次" count the user
+      // saw during streaming). Fall back to the merged string for older
+      // sessions that only persisted `thinking`.
+      const blocks = message.thinkingBlocks?.map((b) => b.trim()).filter((b) => b.length > 0);
       const parts: MessagePart[] = [];
-      if (message.thinking) parts.push({ type: "thinking", content: message.thinking, streaming: false });
+      if (blocks && blocks.length > 0) {
+        for (const block of blocks) {
+          parts.push({ type: "thinking", content: block, streaming: false });
+        }
+      } else if (message.thinking) {
+        parts.push({ type: "thinking", content: message.thinking, streaming: false });
+      }
       if (toolExecutions) {
         for (const execution of toolExecutions) {
           parts.push({ type: "tool", execution });

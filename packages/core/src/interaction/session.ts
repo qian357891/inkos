@@ -47,6 +47,12 @@ export const InteractionMessageSchema = z.object({
   // rendered from toolExecutions, not from free text.
   content: z.string(),
   thinking: z.string().optional(),
+  // Per-iteration thinking prose, in the order the model emitted them. Each
+  // entry is one thinking block from `AgentMessage.content`. Older sessions
+  // (and tool-only turns) won't have this — the UI falls back to a single
+  // part built from `thinking`. Preferred over `thinking` for re-rendering
+  // because it preserves the iteration count the user saw during streaming.
+  thinkingBlocks: z.array(z.string()).optional(),
   toolExecutions: z.array(ToolExecutionSchema).optional(),
   timestamp: z.number().int().nonnegative(),
 });

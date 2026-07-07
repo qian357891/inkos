@@ -525,6 +525,20 @@ function thinkingFromContent(content: unknown): string | undefined {
   return value || undefined;
 }
 
+/**
+ * Like thinkingFromContent, but preserves the per-iteration boundary instead
+ * of merging every block into one string. Used to restore the
+ * "思考 N 次" count the user saw during streaming.
+ */
+function thinkingBlocksFromContent(content: unknown): string[] | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const blocks = content
+    .filter((block): block is Record<string, unknown> => isObject(block) && block.type === "thinking")
+    .map((block) => (typeof block.thinking === "string" ? block.thinking : "").trim())
+    .filter((value) => value.length > 0);
+  return blocks.length > 0 ? blocks : undefined;
+}
+
 function joinThinking(parts: ReadonlyArray<string | undefined>): string | undefined {
   const values = parts
     .map((part) => part?.trim() ?? "")
@@ -566,6 +580,13 @@ function messageEventToInteractionMessage(
       event.legacyDisplay?.thinking,
       options.suppressAssistantText ? rawText : undefined,
     ]);
+    // Per-iteration thinking prose, in order. We re-derive from the raw
+    // AgentMessage.content blocks rather than reading a separate persisted
+    // field — the streaming path already writes each `thinking:start` /
+    // `thinking:end` round as its own content block, so the structure is
+    // already on disk. The `thinking` string above stays for legacy
+    // consumers; the UI prefers `thinkingBlocks` when present.
+    const thinkingBlocks = thinkingBlocksFromContent(raw.content);
     const toolExecutions = restoredToolExecutions?.length
       ? restoredToolExecutions
       : event.legacyDisplay?.toolExecutions as ToolExecution[] | undefined;
@@ -575,6 +596,7 @@ function messageEventToInteractionMessage(
       role: "assistant",
       content,
       ...(thinking ? { thinking } : {}),
+      ...(thinkingBlocks?.length ? { thinkingBlocks } : {}),
       ...(toolExecutions?.length ? { toolExecutions } : {}),
       timestamp: event.timestamp,
     };

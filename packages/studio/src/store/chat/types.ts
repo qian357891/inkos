@@ -56,6 +56,14 @@ export interface SessionMessage {
   readonly role: "user" | "assistant" | "system";
   readonly content: string;
   readonly thinking?: string;
+  /**
+   * Per-iteration thinking prose, in the order the model emitted them. Each
+   * entry maps 1:1 to a `thinking:start` / `thinking:end` round in the live
+   * stream, so the UI can restore the "思考 N 次" count exactly as the user
+   * saw it during the original session. Older sessions won't have this;
+   * the UI falls back to a single part built from `thinking`.
+   */
+  readonly thinkingBlocks?: ReadonlyArray<string>;
   readonly toolExecutions?: ReadonlyArray<ToolExecution>;
   readonly timestamp: number;
 }

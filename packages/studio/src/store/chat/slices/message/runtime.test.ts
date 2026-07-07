@@ -208,6 +208,64 @@ describe("deserializeMessages", () => {
     expect(messages[0]?.toolExecutions?.[0]?.tool).toBe("interactive_film_create");
     expect(messages[0]?.parts?.[0]?.type).toBe("tool");
   });
+
+  it("expands thinkingBlocks into one thinking part per iteration", () => {
+    // Each entry is one thinking:start/end round from the live stream. The
+    // task-level "思考 N 次" counter depends on this 1:1 mapping surviving
+    // the round trip through transcript → SessionMessage → Message.parts.
+    const messages = deserializeMessages([
+      {
+        role: "assistant",
+        content: "完成了。",
+        timestamp: 1,
+        thinking: "iter 1\n\n---\n\niter 2\n\n---\n\niter 3",
+        thinkingBlocks: ["iter 1", "iter 2", "iter 3"],
+      },
+    ]);
+
+    const parts = messages[0]?.parts ?? [];
+    const thinkingParts = parts.filter((p) => p.type === "thinking");
+    expect(thinkingParts).toHaveLength(3);
+    expect(thinkingParts.map((p) => (p.type === "thinking" ? p.content : ""))).toEqual([
+      "iter 1",
+      "iter 2",
+      "iter 3",
+    ]);
+    expect(parts.map((p) => p.type)).toEqual(["thinking", "thinking", "thinking", "text"]);
+  });
+
+  it("falls back to a single thinking part when only the merged `thinking` string is present", () => {
+    // Old sessions (pre-thinkingBlocks) only have the joined string. We must
+    // not drop the thinking content, but the count collapses to 1 — that's
+    // the documented backward-compat behavior.
+    const messages = deserializeMessages([
+      {
+        role: "assistant",
+        content: "hi",
+        timestamp: 1,
+        thinking: "some old thinking",
+      },
+    ]);
+
+    const thinkingParts = (messages[0]?.parts ?? []).filter((p) => p.type === "thinking");
+    expect(thinkingParts).toHaveLength(1);
+    expect(thinkingParts[0]).toMatchObject({ type: "thinking", content: "some old thinking", streaming: false });
+  });
+
+  it("filters out empty-string thinkingBlocks entries", () => {
+    const messages = deserializeMessages([
+      {
+        role: "assistant",
+        content: "ok",
+        timestamp: 1,
+        thinkingBlocks: ["real thought", "   ", ""],
+      },
+    ]);
+
+    const thinkingParts = (messages[0]?.parts ?? []).filter((p) => p.type === "thinking");
+    expect(thinkingParts).toHaveLength(1);
+    expect(thinkingParts[0]).toMatchObject({ type: "thinking", content: "real thought" });
+  });
 });
 
 describe("withToolExecutions", () => {
